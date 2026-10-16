@@ -1,9 +1,6 @@
-# Cowichan-fishing-alerts
-Auto alerts for when fishing conditions will be good
-
 # Cowichan fishing alert (v2)
 
-Runs twice a day (about 6am and 5pm Pacific) on GitHub Actions. It reads the Cowichan gauges and the weather forecast, scores five fisheries against Cowichan-specific flow bands and the regulation calendar, and pushes to your phone through ntfy only when something changes.
+Runs twice a day on GitHub Actions, at about 4:37am and 5:07pm Pacific. It reads the Cowichan gauges and the weather forecast, scores five fisheries against Cowichan-specific flow bands and the regulation calendar, and pushes to your phone through ntfy only when something changes.
 
 ## What it watches
 - **Flow:** Water Survey of Canada 08HA011 (near Duncan) and 08HA002 (weir release at Lake Cowichan).
@@ -27,8 +24,17 @@ Every score is gated by the regulation calendar in `open_sections()`, built from
 - A new heads-up appears: a weir release was raised, a window is forming, rain is coming to freshen the river, or good conditions are about to blow out.
 - A regulation change or a data problem.
 - **Thursday's 5pm run** also sends a weekend outlook. It ranks Fri, Sat and Sun on a rough flow projection and includes the strategy card for the best bet.
+- With `ALWAYS_SEND=true`, the **evening run** also sends a daily summary even when nothing changed. Morning runs still only push on changes. Manual runs always send, so tests show up on your phone.
 
-Each alert includes a **strategy card** for the GOOD species: the open section and its gear rule, spots, gear, fly, the play, and sunrise/sunset.
+## What a notification looks like
+The phone gets a short version:
+- The day it's for. Morning runs say "Today"; evening runs say "Tomorrow", since you're planning the next first light.
+- Each fishery with its score and the top reason.
+- Flow, rain, temperature and sun times.
+- Any heads-ups.
+- A compact plan for the best species: section, gear, fly, the play, and timing.
+
+There are three buttons: **Gauge**, **Regs** and **Full report**. Full report opens the GitHub run summary, which has every reason, the full strategy card and the links. The notification is plain text with emoji, so it looks the same in the iPhone and Android apps.
 
 ## Setup
 1. Install the **ntfy** app and subscribe to a random topic, e.g. `cowichan-x7k2q9`. Anyone who knows the topic can read it.
@@ -37,6 +43,8 @@ Each alert includes a **strategy card** for the GOOD species: the open section a
    - Add the secret `NTFY_TOPIC`.
    - Optionally set the variable `ALWAYS_SEND=true` to get every run while you calibrate.
 4. Go to Actions → Cowichan fishing alert → Run workflow. Tick "weekend outlook" to test that too.
+
+The schedule lists each run twice, one for daylight time and one for standard time, because GitHub's clock is UTC. The script runs the one that matches and skips the other within seconds, so you'll see four runs a day on the Actions tab, two of them very short.
 
 The workflow commits `state.json` after each run. That file is the alert's memory: last ratings, heads-ups already sent, regulation baselines and the season's first fall freshet. The first run captures the regulation baselines silently. The regular commits should also keep GitHub from disabling the schedule for inactivity.
 
