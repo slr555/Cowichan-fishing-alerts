@@ -48,6 +48,24 @@ The schedule lists each run twice, one for daylight time and one for standard ti
 
 The workflow commits `state.json` after each run. That file is the alert's memory: last ratings, heads-ups already sent, regulation baselines and the season's first fall freshet. The first run captures the regulation baselines silently. The regular commits should also keep GitHub from disabling the schedule for inactivity.
 
+## A friend's feed
+A friend can get their own feed, with their own topic and settings. They don't need GitHub access.
+
+1. Pick a second random topic, e.g. `cowichan-buddy-m4p8z1`. Your friend subscribes to it in their ntfy app; they shouldn't use your topic.
+2. Add the secret `NTFY_TOPIC_FRIEND` with that topic name.
+3. Optionally, add these variables:
+
+| Variable | What it does | Default |
+|---|---|---|
+| `FRIEND_ALERTS` | Which alert types they get, comma separated: `good`, `headsup`, `closing`, `daily`, `weekend`, `regs`, `system`, or `all` | `good,weekend` |
+| `FRIEND_SPECIES` | Limits `good`, `headsup` and `closing` to these: `coho`, `chum`, `steelhead`, `egg`, `spring` | blank = all |
+
+Examples:
+- `FRIEND_ALERTS=good,headsup,weekend` and `FRIEND_SPECIES=steelhead` sends steelhead GOOD alerts and steelhead heads-ups, plus the Thursday outlook.
+- Weir-release heads-ups count for every species.
+
+The `daily` type is the evening summary, and only exists while `ALWAYS_SEND=true`. The friend's notifications skip the Full report button, since it links to your private repo.
+
 ## Testing locally
 ```
 python cowichan_alert.py --dry-run            # live data, no push, no state saved

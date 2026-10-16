@@ -32,6 +32,9 @@ jobs:
         env:
           NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
           ALWAYS_SEND: ${{ vars.ALWAYS_SEND }}
+          NTFY_TOPIC_FRIEND: ${{ secrets.NTFY_TOPIC_FRIEND }}
+          FRIEND_ALERTS: ${{ vars.FRIEND_ALERTS }}
+          FRIEND_SPECIES: ${{ vars.FRIEND_SPECIES }}
           SCHEDULE: ${{ github.event.schedule }}
         run: python3 cowichan_alert.py ${{ inputs.weekend && '--weekend' || '' }}
       - name: Save alert state

@@ -49,9 +49,29 @@ WX_UPPER = (48.82, -124.05)  # Lake Cowichan: rain that moves the river
 WX_LOWER = (48.78, -123.71)  # Duncan: temperature, barometer, cloud, sun
 
 NTFY_SERVER = os.getenv("NTFY_SERVER", "https://ntfy.sh")
-NTFY_TOPIC = os.getenv("NTFY_TOPIC", "").strip()
-if "://" in NTFY_TOPIC:                      # accept a pasted URL like https://ntfy.sh/my-topic
-    NTFY_TOPIC = NTFY_TOPIC.rstrip("/").rsplit("/", 1)[-1]
+
+
+def _topic(name):
+    t = os.getenv(name, "").strip()          # accept a pasted URL like https://ntfy.sh/my-topic
+    return t.rstrip("/").rsplit("/", 1)[-1] if "://" in t else t
+
+
+def _set(name, default=""):
+    return {x.strip().lower() for x in (os.getenv(name) or default).split(",") if x.strip()}
+
+
+NTFY_TOPIC = _topic("NTFY_TOPIC")
+
+# Friend feed: its own ntfy topic with its own filter.
+#   FRIEND_ALERTS: which alert types to forward (default: good,weekend), or "all"
+#   FRIEND_SPECIES: limit good/headsup/closing alerts to these species (blank = all)
+ALERT_KINDS = {"good", "headsup", "closing", "daily", "weekend", "regs", "system"}
+SPECIES_KINDS = {"good", "headsup", "closing"}
+FRIEND_TOPIC = _topic("NTFY_TOPIC_FRIEND")
+FRIEND_ALERTS = _set("FRIEND_ALERTS", "good,weekend")
+if "all" in FRIEND_ALERTS:
+    FRIEND_ALERTS = set(ALERT_KINDS)
+FRIEND_SPECIES = _set("FRIEND_SPECIES")
 ALWAYS_SEND = os.getenv("ALWAYS_SEND", "false").strip().lower() == "true"
 STATE_FILE = os.getenv("STATE_FILE", os.path.join(HERE, "state.json"))
 DFO_REGS_URL = os.getenv("DFO_REGS_URL", "https://www.pac.dfo-mpo.gc.ca/fm-gp/rec/fresh-douce/region1-eng.html")
@@ -761,7 +781,7 @@ def check_regs(state, now):
                 st["alerted"] = True
                 msgs.append(msg(f"Cowichan regs watcher can't read {src}",
                                 f"{st['fails']} failed checks in a row\n{str(e)[:200]}\n\nCheck the page manually.",
-                                "3", ["warning"], click=DFO_PAGE))
+                                "3", ["warning"], click=DFO_PAGE, kinds={"system": set()}))
             continue
         st["fails"], st["alerted"] = 0, False
         old = st["rows"]
@@ -774,7 +794,8 @@ def check_regs(state, now):
             removed = [r for r in old if r not in rows]
             body = [f"📜 {src} changed for the Cowichan"]
             body += [f"➕ {r}" for r in added] + [f"➖ {r}" for r in removed]
-            msgs.append(msg("Cowichan regulations changed", "\n".join(body), "4", ["scroll"], click=DFO_PAGE))
+            msgs.append(msg("Cowichan regulations changed", "\n".join(body), "4", ["scroll"],
+                            click=DFO_PAGE, kinds={"regs": set()}))
     return msgs
 
 # ============================== ALERTING ===================================
@@ -913,12 +934,32 @@ def decide(state, scores, heads, live):
         title, pr, tags = "Cowichan daily: nothing open or in season", "2", ["fish"]
     changes = [f"{s.sp['name']}: {prev.get(s.sp['key'], 'new')} -> GOOD" for s in up]
     changes += [f"{s.sp['name']}: GOOD -> {tier(s.score)}" for s in down]
-    return title, pr, tags, bool(up or down or new_heads), changes
+    kinds = {}                                # alert type -> species it is about
+    if up:
+        kinds["good"] = {s.sp["key"] for s in up}
+    if new_heads:
+        kinds["headsup"] = {h[0].split(":")[0] for h in new_heads}
+    if down:
+        kinds["closing"] = {s.sp["key"] for s in down}
+    return title, pr, tags, bool(up or down or new_heads), changes, kinds
 
 
-def msg(title, push, priority="3", tags=None, full=None, click=None):
+def msg(title, push, priority="3", tags=None, full=None, click=None, kinds=None):
     return {"title": title, "push": push, "full": full or push, "priority": priority,
-            "tags": tags or [], "click": click or GAUGE_LINK}
+            "tags": tags or [], "click": click or GAUGE_LINK, "kinds": kinds or {}}
+
+
+def friend_wants(m):
+    if not FRIEND_TOPIC:
+        return False
+    for kind, species in m["kinds"].items():
+        if kind not in FRIEND_ALERTS:
+            continue
+        if kind not in SPECIES_KINDS or not FRIEND_SPECIES:
+            return True
+        if "weir" in species or species & FRIEND_SPECIES:   # weir pulses matter to everyone
+            return True
+    return False
 
 
 def fit(body, limit=MAX_PUSH_BYTES):
@@ -934,19 +975,20 @@ def run_url():
     return f"{srv}/{repo}/actions/runs/{run}" if srv and repo and run else None
 
 
-def send_ntfy(m):
+def send_ntfy(m, topic=None, secret="NTFY_TOPIC", report=True):
     """Push one message. Returns an error string, or None on success."""
-    if not NTFY_TOPIC:
-        print(f"[no NTFY_TOPIC] would push: {m['title']}")
+    topic = NTFY_TOPIC if topic is None else topic
+    if not topic:
+        print(f"[no {secret}] would push: {m['title']}")
         return None
-    if not re.fullmatch(r"[-_A-Za-z0-9]{1,64}", NTFY_TOPIC):
-        return ("NTFY_TOPIC must be just the topic name (letters, numbers, - and _, max 64), "
-                f"got {len(NTFY_TOPIC)} characters with other symbols in it")
+    if not re.fullmatch(r"[-_A-Za-z0-9]{1,64}", topic):
+        return (f"{secret} must be just the topic name (letters, numbers, - and _, max 64), "
+                f"got {len(topic)} characters with other symbols in it")
     actions = [{"action": "view", "label": "Gauge", "url": GAUGE_LINK},
                {"action": "view", "label": "Regs", "url": DFO_PAGE}]
-    if run_url():
+    if report and run_url():      # the run summary lives in your private repo
         actions.append({"action": "view", "label": "Full report", "url": run_url()})
-    payload = {"topic": NTFY_TOPIC, "title": m["title"], "message": fit(m["push"]),
+    payload = {"topic": topic, "title": m["title"], "message": fit(m["push"]),
                "priority": int(m["priority"]), "tags": m["tags"], "click": m["click"], "actions": actions}
     req = urllib.request.Request(f"{NTFY_SERVER.rstrip('/')}/", data=json.dumps(payload).encode("utf-8"),
                                  method="POST", headers={"Content-Type": "application/json", **UA})
@@ -974,11 +1016,16 @@ def flush(outbox, dry_run):
     for m in outbox:
         print(f"\n=== {m['title']}  [p{m['priority']} {','.join(m['tags'])}] ===\n{m['push']}")
         write_summary(m["title"], m["full"])
-        if not dry_run:
-            err = send_ntfy(m)
-            if err:
-                print(f"::error::{err}")
-                PUSH_ERRORS.append(err)
+        to_friend = friend_wants(m)
+        print(f"-> you{' + friend' if to_friend else ''}")
+        if dry_run:
+            continue
+        errs = [send_ntfy(m)]
+        if to_friend:
+            errs.append(send_ntfy(m, FRIEND_TOPIC, "NTFY_TOPIC_FRIEND", report=False))
+        for err in filter(None, errs):
+            print(f"::error::{err}")
+            PUSH_ERRORS.append(err)
 
 
 def load_state():
@@ -1062,6 +1109,9 @@ def main():
     ap.add_argument("--demo", choices=sorted(DEMOS))
     args = ap.parse_args()
 
+    bad = (FRIEND_ALERTS - ALERT_KINDS) if FRIEND_TOPIC else set()
+    if bad:
+        print(f"::warning::FRIEND_ALERTS has unknown types {sorted(bad)}; valid: {', '.join(sorted(ALERT_KINDS))}")
     now = datetime.now(UTC)
     slot = run_slot(now)
     if slot is None:
@@ -1103,14 +1153,15 @@ def main():
             fail["alerted_at"] = now.isoformat()
             outbox.append(msg("Cowichan alert: data problem",
                               f"Run failed ({fail['count']} in a row)\n{str(e)[:300]}\n\n"
-                              "No fishing alerts until this clears.", "3", ["warning"]))
+                              "No fishing alerts until this clears.", "3", ["warning"],
+                              kinds={"system": set()}))
         flush(outbox, args.dry_run)
         if persist:
             save_state(state)
         return
     if fail.get("alerted_at"):
         outbox.append(msg("Cowichan alert: data is back", "Feeds are working again, alerts resumed.",
-                          "2", ["white_check_mark"]))
+                          "2", ["white_check_mark"], kinds={"system": set()}))
     state["fail"] = {"count": 0, "alerted_at": None}
 
     c = analyse(flow, weir, wxu, wxl, now)
@@ -1132,7 +1183,7 @@ def main():
         general.append(("weir:pulse", f"Weir release raised {fq(c.weir_24)} → {fq(c.weir_q)} m³/s: salmon will "
                                       "move, trout egg bite follows once chinook are on the redds"))
     lines, live, heads = build_report(c, scores, general)
-    title, pr, tags, changed, changes = decide(state, scores, heads, live)
+    title, pr, tags, changed, changes, kinds = decide(state, scores, heads, live)
 
     # Cards: GOOD species first, otherwise the species a heads-up is about.
     cards = [s for s in live if tier(s.score) == "GOOD"][:2]
@@ -1160,7 +1211,7 @@ def main():
 
     daily_summary = ALWAYS_SEND and (slot == "evening" or manual)
     if changed or daily_summary:
-        outbox.append(msg(tag + title, push, pr, tags, full))
+        outbox.append(msg(tag + title, push, pr, tags, full, kinds=kinds or {"daily": set()}))
     else:
         print(f"No change worth a push ({title}).\n{push}")
         write_summary(f"{title} (no push)", full)
@@ -1168,7 +1219,7 @@ def main():
     due = slot == "evening" and local.weekday() == OUTLOOK_WEEKDAY
     if args.weekend or (due and state.get("last_outlook") != local.date().isoformat()):
         ot, opush, ofull = build_outlook(c, flow, wxu, wxl, rec)
-        outbox.append(msg(tag + ot, opush, "3", ["calendar"], ofull))
+        outbox.append(msg(tag + ot, opush, "3", ["calendar"], ofull, kinds={"weekend": set()}))
         state["last_outlook"] = local.date().isoformat()
 
     state["last_run"] = now.isoformat()
