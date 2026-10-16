@@ -1,0 +1,46 @@
+name: Cowichan fishing alert
+
+on:
+  schedule:
+    # GitHub cron is UTC. 13:00 UTC = 6am PDT / 5am PST.
+    # 00:00 UTC = 5pm PDT / 4pm PST; on Thursdays this run also sends the weekend outlook.
+    - cron: "0 13 * * *"
+    - cron: "0 0 * * *"
+  workflow_dispatch:
+    inputs:
+      weekend:
+        description: "Also send the weekend outlook now"
+        type: boolean
+        default: false
+
+permissions:
+  contents: write   # lets the run commit state.json (alert memory)
+
+concurrency:
+  group: cowichan-alert
+  cancel-in-progress: false
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Score conditions and alert
+        env:
+          NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
+          ALWAYS_SEND: ${{ vars.ALWAYS_SEND }}
+        run: python cowichan_alert.py ${{ inputs.weekend && '--weekend' || '' }}
+      - name: Save alert state
+        if: always()
+        run: |
+          [ -f state.json ] || exit 0
+          git config user.name "cowichan-alert-bot"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add state.json
+          git diff --cached --quiet && exit 0
+          git commit -m "Update alert state"
+          git push
