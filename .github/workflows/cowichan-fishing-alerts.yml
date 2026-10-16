@@ -27,16 +27,13 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 8
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
+      - uses: actions/checkout@v5
       - name: Score conditions and alert
         env:
           NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
           ALWAYS_SEND: ${{ vars.ALWAYS_SEND }}
           SCHEDULE: ${{ github.event.schedule }}
-        run: python cowichan_alert.py ${{ inputs.weekend && '--weekend' || '' }}
+        run: python3 cowichan_alert.py ${{ inputs.weekend && '--weekend' || '' }}
       - name: Save alert state
         if: always()
         run: |
@@ -45,5 +42,14 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add state.json
           git diff --cached --quiet && exit 0
-          git commit -m "Update alert state"
-          git push
+          git commit -q -m "Update alert state"
+          # Rebase onto the latest branch first, so this works even if files changed
+          # since the run started (e.g. you edited the script, or re-ran an old run).
+          for i in 1 2 3; do
+            git fetch -q origin "$GITHUB_REF_NAME" \
+              && git rebase -q -X theirs FETCH_HEAD \
+              && git push -q origin "HEAD:$GITHUB_REF_NAME" && exit 0
+            git rebase --abort 2>/dev/null || true
+            sleep 5
+          done
+          echo "::warning::Could not save state.json this run; an alert may repeat once."
