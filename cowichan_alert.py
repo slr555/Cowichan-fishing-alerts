@@ -2,7 +2,7 @@
 """
 Cowichan River fishing alert, v2.
 
-Twice a day: pulls real-time discharge (Water Survey of Canada 08HA011 near
+Twice a day (about 4:37am and 5:07pm Pacific): pulls real-time discharge (Water Survey of Canada 08HA011 near
 Duncan and 08HA002 at the Lake Cowichan weir) and weather (Open-Meteo), scores
 each species against Cowichan-specific flow bands and the regulation calendar,
 and pushes an ntfy alert only when something changes.
@@ -56,7 +56,8 @@ GOOD, FAIR = 7.0, 5.0
 DROUGHT_FLOW = 7.0        # Sep-Oct below this at Duncan: no GOOD alerts
 STALE_HOURS = 12          # gauge reading older than this = feed problem
 REG_FAILS_BEFORE_ALERT = 3
-OUTLOOK_WEEKDAY, OUTLOOK_HOUR = 3, 13   # Thursday, after 1pm Pacific
+MORNING_HOUR, EVENING_HOUR = 4, 17   # Pacific hours of the two scheduled runs
+OUTLOOK_WEEKDAY = 3                  # weekend outlook goes out on Thursday's evening run
 MAX_PUSH_BYTES = 3900     # ntfy turns longer messages into attachments
 REGS_VALID_UNTIL = date(2027, 3, 31)    # 2025-2027 synopsis
 
@@ -156,6 +157,36 @@ CARDS = {
 LINKS = ("DFO: https://www.pac.dfo-mpo.gc.ca/fm-gp/rec/fresh-douce/region1-eng.html\n"
          "BC: https://www2.gov.bc.ca/gov/content/sports-culture/recreation/fishing-hunting/fishing/fishing-regulations")
 GAUGE_LINK = f"https://wateroffice.ec.gc.ca/report/real_time_e.html?stn={STATION_LOWER}"
+
+# Short versions for the phone notification (full versions go to the run summary).
+SECTION_SHORT = {
+    "A": "Weir → Greendale",
+    "B": "Greendale → Mile 70.2",
+    "C": "Mile 70.2 → Mile 66 (Skutz)",
+    "D": "Mile 66 → Sandy Pool",
+    "E": "Sandy Pool → tidewater",
+}
+SHORT_CARDS = {
+    "coho": {"gear": "Vibrex #3-4 brass/chartreuse on a single barbless siwash · 3/8 oz pink jig",
+             "fly": "8 wt sink tip, pink or chartreuse Clouser",
+             "play": "Fish the drop 1-3 days after the push", "when": "first light",
+             "note": "Non-tidal salmon stamp to keep one"},
+    "chum": {"gear": "Chartreuse/pink spinner or jig",
+             "fly": "8 wt, chartreuse streamer",
+             "play": "Retention TBD, treat as catch and release", "when": "any light", "note": ""},
+    "steelhead": {"gear": "Float a 1/8 oz jig or unscented pink worm · Corky #14-8 by clarity",
+                  "fly": "Sink tip, black/purple/pink leech or intruder",
+                  "play": "Fish the drop after a freshet, soft edges when high", "when": "all day, go slow",
+                  "note": "Steelhead stamp · release wild fish"},
+    "egg": {"gear": "Float an unscented 8-10 mm bead above a single barbless hook",
+            "fly": "Indicator + 8-10 mm egg, peach and pale cream · flesh fly from late Nov",
+            "play": "Tailouts and seams below the redds, never wade on them",
+            "when": "eggs midday, streamers at first/last light", "note": ""},
+    "spring": {"gear": "Small spinner or spoon",
+               "fly": "White/pearl fry streamer #6-8 · March Brown dry #12 midday",
+               "play": "Browns are hunting salmon fry", "when": "first and last light", "note": ""},
+}
+DFO_PAGE = "https://www.pac.dfo-mpo.gc.ca/fm-gp/rec/fresh-douce/region1-eng.html"
 
 # ============================ REG CALENDAR =================================
 
@@ -361,7 +392,7 @@ def analyse(flow, weir, wxu, wxl, now):
     temps = wvals(hl, now, now + timedelta(hours=24), "temp") or [10.0]
     local = now.astimezone(PT)
     d0 = local.replace(hour=7, minute=0, second=0, microsecond=0)
-    if local.hour >= 17:
+    if local.hour >= 12:   # evening run: look at tomorrow's daylight
         d0 += timedelta(days=1)
     clouds = wvals(hl, d0.astimezone(UTC), (d0 + timedelta(hours=10)).astimezone(UTC), "cloud") or [50]
     sun = wxl["daily"].get(d0.date(), {})
@@ -575,6 +606,7 @@ def outlook_days(today):
 
 
 def build_outlook(c, flow, wxu, wxl, freshet):
+    """Returns (title, push_text, full_text)."""
     today = c.day
     days = outlook_days(today)
     rain = {d: v["precip"] for d, v in wxu["daily"].items()}
@@ -596,19 +628,15 @@ def build_outlook(c, flow, wxu, wxl, freshet):
         series[d] = q
 
     hl = wxl["hourly"]
-    lines = ["Weekend outlook (flow projection is rough until calibrated)"]
-    best = None
+    rows, best = [], None
     for d in days:
         if d not in wxl["daily"]:
             continue
-        prev = [series.get(d - timedelta(days=i)) for i in range(1, 8)]
-        prev = [p for p in prev if p is not None]
+        prev = [p for p in (series.get(d - timedelta(days=i)) for i in range(1, 8)) if p is not None]
         q = series[d]
-        q24 = prev[0] if prev else q
         window = [q] + prev[:6]
         peak = max(window)
-        hrs_peak = 24 * window.index(peak)
-        phase, trend = classify(q, q24, peak, min(window), hrs_peak)
+        phase, trend = classify(q, prev[0] if prev else q, peak, min(window), 24 * window.index(peak))
         noon = datetime(d.year, d.month, d.day, 12, tzinfo=PT).astimezone(UTC)
         prs = wvals(hl, noon - timedelta(hours=24), noon - timedelta(hours=23), "pressure")
         prn = wvals(hl, noon, noon + timedelta(hours=1), "pressure")
@@ -625,19 +653,31 @@ def build_outlook(c, flow, wxu, wxl, freshet):
             sunrise=hhmm(dl["sunrise"]), sunset=hhmm(dl["sunset"]))
         scores = [score_species(sp, cd, egg_activation(freshet, d)) for sp in SPECIES]
         live = sorted([s for s in scores if s.score > 0], key=lambda s: -s.score)
-        lines.append(f"{d.strftime('%a %b %d')}: ~{q:.0f} m3/s {phase} | rain {rain.get(d, 0):.0f} mm | "
-                     f"{dl['tmin']:.0f} to {dl['tmax']:.0f} C")
-        lines.append("   " + (", ".join(f"{s.sp['name']} {s.score} {tier(s.score)}" for s in live[:3]) or "nothing open or in season"))
+        rows.append((d, q, phase, rain.get(d, 0), dl, live))
         if live and (best is None or live[0].score > best[1].score):
             best = (d, live[0], cd)
-    if best and best[1].score >= FAIR:
-        d, sc, cd = best
-        title = f"Cowichan weekend: best is {d.strftime('%a')} ({sc.sp['name']} {sc.score})"
-        lines += ["", f"Best bet: {d.strftime('%a')}, {sc.sp['name']} {sc.score}", strategy_card(sc, cd)]
+
+    good_best = best if best and best[1].score >= FAIR else None
+    push, full = [], ["Weekend outlook (flow projection is rough until calibrated)"]
+    for d, q, phase, r, dl, live in rows:
+        star = "⭐" if good_best and d == good_best[0] else "📅"
+        push.append(f"{star} {d:%a %b} {d.day} · ~{q:.0f} m³/s {phase} · 🌧️ {r:.0f} mm")
+        push.append("     " + (" · ".join(f"{ICON[tier(s.score)]} {s.sp['name']} {s.score:.1f}" for s in live[:2])
+                              or "nothing open or in season"))
+        full.append(f"{d:%a %b %d}: ~{q:.0f} m3/s {phase} | rain {r:.0f} mm | {dl['tmin']:.0f} to {dl['tmax']:.0f} C")
+        full.append("   " + (", ".join(f"{s.sp['name']} {s.score} {tier(s.score)}" for s in live[:3])
+                             or "nothing open or in season"))
+    if good_best:
+        d, sc, cd = good_best
+        title = f"Weekend: {d:%A} looks best ({sc.sp['name']} {sc.score:.1f})"
+        push += [""] + compact_card(sc, cd)
+        full += ["", f"Best bet: {d:%a}, {sc.sp['name']} {sc.score}", strategy_card(sc, cd)]
     else:
-        title = "Cowichan weekend: nothing worth the drive"
-    lines += ["", f"Rules: {STANDING_RULES}"]
-    return title, "\n".join(lines)
+        title = "Weekend: nothing worth the drive"
+    push += ["", "ℹ️ Flow projection is rough until it's calibrated"]
+    full += ["", f"Rules: {STANDING_RULES}"]
+    return title, "\n".join(push), "\n".join(full)
+
 
 # ============================ REG WATCHER ==================================
 
@@ -685,7 +725,10 @@ def dfo_cowichan_rows(page):
             for b in block:
                 cells = b + [""] * (5 - len(b))
                 area = cells[1] or area   # carry the section down to continuation rows
-                short = area.replace("from the ", "").replace("from ", "")[:45]
+                short = (area.replace("the white triangle boundary sign located in Sandy Pool Regional Park", "Sandy Pool")
+                         .replace(" downstream to the tidal boundary.", " → tidewater")
+                         .replace(" downstream to ", " → ").replace("from the ", "").replace("from ", "")
+                         .rstrip(".,"))[:40]
                 out.append(" | ".join(x for x in [short] + cells[2:] if x))
             return out
     return None
@@ -711,8 +754,9 @@ def check_regs(state, now):
             print(f"reg watcher: {src} failed ({e})")
             if st["fails"] >= REG_FAILS_BEFORE_ALERT and not st["alerted"]:
                 st["alerted"] = True
-                msgs.append((f"Cowichan regs watcher can't read {src}",
-                             f"{st['fails']} failed checks in a row: {str(e)[:200]}\nCheck manually:\n{url}", "3"))
+                msgs.append(msg(f"Cowichan regs watcher can't read {src}",
+                                f"{st['fails']} failed checks in a row\n{str(e)[:200]}\n\nCheck the page manually.",
+                                "3", ["warning"], click=DFO_PAGE))
             continue
         st["fails"], st["alerted"] = 0, False
         old = st["rows"]
@@ -723,13 +767,95 @@ def check_regs(state, now):
         if rows != old:
             added = [r for r in rows if r not in old]
             removed = [r for r in old if r not in rows]
-            body = [f"{src} changed for the Cowichan:"]
-            body += [f"+ {r}" for r in added] + [f"- {r}" for r in removed]
-            body += ["", url]
-            msgs.append(("Cowichan regulations changed", "\n".join(body), "4"))
+            body = [f"📜 {src} changed for the Cowichan"]
+            body += [f"➕ {r}" for r in added] + [f"➖ {r}" for r in removed]
+            msgs.append(msg("Cowichan regulations changed", "\n".join(body), "4", ["scroll"], click=DFO_PAGE))
     return msgs
 
 # ============================== ALERTING ===================================
+
+ICON = {"GOOD": "✅", "FAIR": "🟡", "POOR": "⚪"}
+
+SHORT_WHY = [  # (start of a full reason, short label; None hides it on the phone)
+    ("flow in sweet spot", "good flow"), ("flow fishable but low", "a bit low"),
+    ("flow fishable but high", "a bit high"), ("too low", "too low"), ("blown out", "blown out"),
+    ("dropping and clearing", "dropping & clearing"), ("fresh fish moving on a weir", "fish moving on weir release"),
+    ("fresh fish moving", "fish moving"), ("settling flows", "eggs drifting"), ("steady flow", "steady"),
+    ("rising, colour", "rising, colouring up"), ("low and flat", "stale low water"),
+    ("prime push", "prime push flows"), ("salmon fry out", "fry are out"),
+    ("high: fish the soft", "high, fish the edges"), ("drought hold", "drought hold"),
+    ("heavy rain", "heavy rain coming"), ("cold snap", "cold snap"), ("hot,", "too warm"),
+    ("egg bite still building", "still building"), ("no fall freshet", "no freshet yet"),
+    ("flow settling", "settling"), ("stable flow", "steady"), ("flow rising", "rising, colouring up"),
+    ("overcast", "overcast"), ("falling barometer", "falling barometer"),
+    ("light rain", None), ("shoulder season", None),
+]
+FLOW_LABELS = {"good flow", "a bit low", "a bit high"}
+
+
+def short_why(why, n=2):
+    out = []
+    for w in why:
+        label = next((lab for pre, lab in SHORT_WHY if w.startswith(pre)), w)
+        if label and label not in out:
+            out.append(label)
+    ranked = [x for x in out if x not in FLOW_LABELS] + [x for x in out if x in FLOW_LABELS]
+    return " · ".join(ranked[:n])
+
+
+def compact_card(sc, c):
+    key = sc.sp["key"]
+    sh, by = SHORT_CARDS[key], dict(sc.opens)
+    picks = [s for s in CARDS[key]["prefer"] if s in by][:2]
+    if not picks:
+        return []
+    lines = [f"🐟 {sc.sp['name']} plan"]
+    for s in picks:
+        rule = by[s]
+        flag = " ⚠️ confirm with DFO" if "[" in rule else ""
+        lines.append(f"📍 {SECTION_SHORT[s]}: {rule.split(' [')[0]}{flag}")
+    if any("fly only" not in by[s] for s in picks):
+        lines.append(f"🎣 {sh['gear']}")
+    lines.append(f"🪰 {sh['fly']}")
+    lines.append(f"💡 {sh['play']}")
+    lines.append(f"⏰ {sh['when'][0].upper() + sh['when'][1:]} · sunrise {c.sunrise}")
+    if sh["note"]:
+        lines.append(f"📝 {sh['note']}")
+    return lines
+
+
+def fq(q):
+    """Flow for display: one decimal when small, whole numbers when big."""
+    return f"{q:.1f}" if q < 20 else f"{q:.0f}"
+
+
+def cond_lines(c):
+    arrow = "↑" if c.trend_24 > 0.05 else "↓" if c.trend_24 < -0.05 else "→"
+    l1 = f"🌊 {fq(c.q_now)} m³/s {arrow} {abs(c.trend_24):.0%} in 24h · {c.phase}"
+    if c.t_peak_7d and c.peak_7d > 1.3 * c.q_now:
+        l1 += f" (peak {c.peak_7d:.0f} {c.t_peak_7d.astimezone(PT):%a})"
+    lines = [l1,
+             f"🌧️ {c.rain_past72:.0f} mm last 3 days · {c.rain_next24:.0f} mm next 24h",
+             f"🌡️ {c.tmin_24:.0f} to {c.tmax_24:.0f}°C · ☁️ {c.cloud_day:.0f}% · 🌅 {c.sunrise} 🌇 {c.sunset}"]
+    if c.drought:
+        lines.append("🏜️ Drought hold: too low to fish fairly")
+    return lines
+
+
+def build_push(c, live, heads, card_scores, day_label):
+    lines = [day_label]
+    lines += [f"{ICON[tier(s.score)]} {s.sp['name']} {s.score:.1f} · {short_why(s.why)}" for s in live[:4]]
+    if not live:
+        lines.append("Nothing in season or open right now")
+    lines += [""] + cond_lines(c)
+    if heads:
+        lines += [""] + [f"👀 {t}" for _, t in heads]
+    for s in card_scores[:1]:
+        card = compact_card(s, c)
+        if card:
+            lines += [""] + card
+    lines += ["", "⚖️ Single barbless · no bait or scent · release wild trout & steelhead"]
+    return "\n".join(lines)
 
 
 def build_report(c, scores, general_heads):
@@ -745,18 +871,23 @@ def build_report(c, scores, general_heads):
     if c.drought:
         lines.append("Drought hold: river is too low for fair fishing; guides advise staying off.")
     lines.append("")
-    icon = {"GOOD": "✅", "FAIR": "🟡", "POOR": "⚪"}
     live = sorted([s for s in scores if s.why not in (["out of season"], ["closed by regulation"])],
                   key=lambda s: -s.score)
     for s in live:
-        lines.append(f"{icon[tier(s.score)]} {s.sp['name']} {s.score} {tier(s.score)}: {', '.join(s.why)}")
+        lines.append(f"{ICON[tier(s.score)]} {s.sp['name']} {s.score} {tier(s.score)}: {', '.join(s.why)}")
     heads = general_heads + [h for s in scores for h in s.heads]
     if heads:
         lines += ["", "Heads-up:"] + [f"• {t}" for _, t in heads]
     return lines, live, heads
 
 
+def names(scores):
+    n = [s.sp["name"] for s in scores]
+    return " & ".join(n) if len(n) <= 2 else ", ".join(n[:-1]) + " & " + n[-1]
+
+
 def decide(state, scores, heads, live):
+    """Returns title, priority, tags, changed?, change notes."""
     prev = state.get("tiers", {})
     up = [s for s in scores if tier(s.score) == "GOOD" and prev.get(s.sp["key"]) != "GOOD"]
     down = [s for s in scores if tier(s.score) != "GOOD" and prev.get(s.sp["key"]) == "GOOD"]
@@ -766,49 +897,67 @@ def decide(state, scores, heads, live):
     state["heads"] = [h[0] for h in heads]
     good = [s for s in scores if tier(s.score) == "GOOD"]
     if up:
-        title, pr = f"Cowichan GOOD: {', '.join(s.sp['name'] for s in good)}", "4"
+        title, pr, tags = f"{names(good)} GOOD on the Cowichan", "4", ["fish"]
     elif new_heads:
-        title, pr = f"Cowichan heads-up: {new_heads[0][1].split(':')[0]}", "3"
+        title, pr, tags = f"Cowichan heads-up: {new_heads[0][1].split(':')[0]}", "3", ["eyes"]
     elif down:
-        title, pr = f"Cowichan: {', '.join(s.sp['name'] for s in down)} window closing", "2"
+        title, pr, tags = f"{names(down)} window closing", "2", ["chart_with_downwards_trend"]
+    elif live:
+        title, pr, tags = f"Cowichan daily: best is {live[0].sp['name']} {live[0].score:.1f}", "2", ["fish"]
     else:
-        best = live[0] if live else None
-        title = f"Cowichan: best is {best.sp['name']} {best.score}" if best else "Cowichan: nothing open or in season"
-        pr = "2"
+        title, pr, tags = "Cowichan daily: nothing open or in season", "2", ["fish"]
     changes = [f"{s.sp['name']}: {prev.get(s.sp['key'], 'new')} -> GOOD" for s in up]
     changes += [f"{s.sp['name']}: GOOD -> {tier(s.score)}" for s in down]
-    return title, pr, bool(up or down or new_heads), changes
+    return title, pr, tags, bool(up or down or new_heads), changes
+
+
+def msg(title, push, priority="3", tags=None, full=None, click=None):
+    return {"title": title, "push": push, "full": full or push, "priority": priority,
+            "tags": tags or [], "click": click or GAUGE_LINK}
 
 
 def fit(body, limit=MAX_PUSH_BYTES):
     if len(body.encode()) <= limit:
         return body
-    note = "\n…(trimmed; full report in the GitHub run summary)"
+    note = "\n…(trimmed, tap Full report)"
     out = body.encode()[: limit - len(note.encode())].decode("utf-8", errors="ignore")
     return out.rsplit("\n", 1)[0] + note
 
 
-def send_ntfy(title, body, priority):
+def run_url():
+    srv, repo, run = (os.getenv(k) for k in ("GITHUB_SERVER_URL", "GITHUB_REPOSITORY", "GITHUB_RUN_ID"))
+    return f"{srv}/{repo}/actions/runs/{run}" if srv and repo and run else None
+
+
+def send_ntfy(m):
     if not NTFY_TOPIC:
-        print(f"[no NTFY_TOPIC] would push: {title}")
+        print(f"[no NTFY_TOPIC] would push: {m['title']}")
         return
-    req = urllib.request.Request(
-        f"{NTFY_SERVER.rstrip('/')}/{NTFY_TOPIC}", data=fit(body).encode("utf-8"), method="POST",
-        headers={"Title": title.encode("ascii", "ignore").decode(), "Priority": priority,
-                 "Tags": "fish", "Click": GAUGE_LINK})
+    actions = [{"action": "view", "label": "Gauge", "url": GAUGE_LINK},
+               {"action": "view", "label": "Regs", "url": DFO_PAGE}]
+    if run_url():
+        actions.append({"action": "view", "label": "Full report", "url": run_url()})
+    payload = {"topic": NTFY_TOPIC, "title": m["title"], "message": fit(m["push"]),
+               "priority": int(m["priority"]), "tags": m["tags"], "click": m["click"], "actions": actions}
+    req = urllib.request.Request(f"{NTFY_SERVER.rstrip('/')}/", data=json.dumps(payload).encode("utf-8"),
+                                 method="POST", headers={"Content-Type": "application/json", **UA})
     with urllib.request.urlopen(req, timeout=30) as r:
-        print(f"ntfy: HTTP {r.status} for '{title}'")
+        print(f"ntfy: HTTP {r.status} for '{m['title']}'")
+
+
+def write_summary(title, text):
+    path = os.getenv("GITHUB_STEP_SUMMARY")
+    if path:
+        with open(path, "a", encoding="utf-8") as f:
+            f.write(f"## {title}\n\n```\n{text}\n```\n")
 
 
 def flush(outbox, dry_run):
-    summary = os.getenv("GITHUB_STEP_SUMMARY")
-    for title, body, pr in outbox:
-        print(f"\n=== {title} [p{pr}] ===\n{body}")
-        if summary:
-            with open(summary, "a", encoding="utf-8") as f:
-                f.write(f"## {title}\n\n```\n{body}\n```\n")
+    for m in outbox:
+        print(f"\n=== {m['title']}  [p{m['priority']} {','.join(m['tags'])}] ===\n{m['push']}")
+        write_summary(m["title"], m["full"])
         if not dry_run:
-            send_ntfy(title, body, pr)
+            send_ntfy(m)
 
 
 def load_state():
@@ -822,6 +971,7 @@ def load_state():
 def save_state(state):
     with open(STATE_FILE, "w", encoding="utf-8") as f:
         json.dump(state, f, indent=2, sort_keys=True, default=str)
+
 
 # =============================== DEMOS =====================================
 
@@ -868,6 +1018,21 @@ DEMOS = {
 # =============================== MAIN ======================================
 
 
+def run_slot(now):
+    """'morning', 'evening' or None (the DST twin of a cron that should not run today).
+
+    The workflow schedules each run twice (PDT and PST versions) because GitHub
+    cron is UTC; SCHEDULE tells us which cron fired so a late start can't confuse it.
+    """
+    sched = os.getenv("SCHEDULE", "").strip()
+    if sched:
+        utc_hour = int(sched.split()[1])
+        offset = now.astimezone(PT).utcoffset().total_seconds() / 3600
+        local = int((utc_hour + offset) % 24)
+        return {MORNING_HOUR: "morning", EVENING_HOUR: "evening"}.get(local)
+    return "morning" if now.astimezone(PT).hour < 12 else "evening"
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--dry-run", action="store_true")
@@ -876,15 +1041,20 @@ def main():
     ap.add_argument("--demo", choices=sorted(DEMOS))
     args = ap.parse_args()
 
+    now = datetime.now(UTC)
+    slot = run_slot(now)
+    if slot is None:
+        print(f"Skipping: cron '{os.getenv('SCHEDULE')}' is the other daylight-saving twin today.")
+        return
+    manual = not os.getenv("SCHEDULE")
+
     # Dry runs never touch state; demos only persist to an explicitly set STATE_FILE.
     persist = not args.dry_run and (not args.demo or "STATE_FILE" in os.environ)
     state = load_state() if (persist or "STATE_FILE" in os.environ) else {}
-    now = datetime.now(UTC)
     outbox = []
     tag = "[DEMO] " if args.demo else ""
 
-    regs_local = DFO_REGS_URL.startswith("file:")
-    if not args.skip_regs and (not args.demo or regs_local):
+    if not args.skip_regs and (not args.demo or DFO_REGS_URL.startswith("file:")):
         outbox += check_regs(state, now)
 
     fail = state.setdefault("fail", {"count": 0, "alerted_at": None})
@@ -892,6 +1062,7 @@ def main():
         if args.demo:
             when, ffn, wfn, rfn = DEMOS[args.demo]()
             now = _pt(when)
+            slot = "morning" if now.astimezone(PT).hour < 12 else "evening"
             flow, weir, wxu, wxl = _demo(now, ffn, wfn, rfn)
         else:
             flow = fetch_flow(STATION_LOWER)
@@ -907,17 +1078,18 @@ def main():
     except Exception as e:  # noqa: BLE001
         fail["count"] += 1
         last = fail.get("alerted_at")
-        if not last or now - datetime.fromisoformat(last) > timedelta(hours=24):
+        if not last or now - datetime.fromisoformat(last) > timedelta(hours=23):
             fail["alerted_at"] = now.isoformat()
-            outbox.append(("Cowichan alert: data problem",
-                           f"Run failed ({fail['count']} in a row): {str(e)[:300]}\n"
-                           f"No fishing alerts until this clears.\nGauge: {GAUGE_LINK}", "3"))
+            outbox.append(msg("Cowichan alert: data problem",
+                              f"Run failed ({fail['count']} in a row)\n{str(e)[:300]}\n\n"
+                              "No fishing alerts until this clears.", "3", ["warning"]))
         flush(outbox, args.dry_run)
         if persist:
             save_state(state)
         return
     if fail.get("alerted_at"):
-        outbox.append(("Cowichan alert: data feeds back", "Data is flowing again; alerts resumed.", "2"))
+        outbox.append(msg("Cowichan alert: data is back", "Feeds are working again, alerts resumed.",
+                          "2", ["white_check_mark"]))
     state["fail"] = {"count": 0, "alerted_at": None}
 
     c = analyse(flow, weir, wxu, wxl, now)
@@ -936,17 +1108,24 @@ def main():
     scores = [score_species(sp, c, egg_activation(rec, c.day)) for sp in SPECIES]
     general = []
     if c.weir_pulse and c.day.month in (9, 10, 11):
-        general.append(("weir:pulse", f"Weir release raised {c.weir_24:.1f} to {c.weir_q:.1f} m3/s: salmon will "
-                                      "move; the trout egg bite follows once chinook are on the redds"))
+        general.append(("weir:pulse", f"Weir release raised {fq(c.weir_24)} → {fq(c.weir_q)} m³/s: salmon will "
+                                      "move, trout egg bite follows once chinook are on the redds"))
     lines, live, heads = build_report(c, scores, general)
-    title, pr, changed, changes = decide(state, scores, heads, live)
+    title, pr, tags, changed, changes = decide(state, scores, heads, live)
 
-    if changes:
-        lines[0:0] = ["Changed: " + "; ".join(changes)]
+    # Cards: GOOD species first, otherwise the species a heads-up is about.
     cards = [s for s in live if tier(s.score) == "GOOD"][:2]
     if not cards:
         keys = {h[0].split(":")[0] for h in heads}
         cards = [s for s in live if s.sp["key"] in keys][:1]
+
+    local = now.astimezone(PT)
+    target = local.date() + timedelta(days=1 if slot == "evening" else 0)
+    day_label = f"{'Tomorrow' if slot == 'evening' else 'Today'}, {target:%a %b} {target.day}"
+    push = build_push(c, live, heads, cards, day_label)
+
+    if changes:
+        lines[0:0] = ["Changed: " + "; ".join(changes)]
     for s in cards:
         card = strategy_card(s, c)
         if card:
@@ -954,23 +1133,21 @@ def main():
     lines += ["", f"Rules: {STANDING_RULES}"]
     if c.day > REGS_VALID_UNTIL:
         lines.append("WARNING: regulation calendar is from the 2025-2027 synopsis; update open_sections().")
+        push += "\n⚠️ Regulation calendar has expired, update the script"
     lines += [LINKS]
-    body = "\n".join(lines)
+    full = "\n".join(lines)
 
-    if changed or ALWAYS_SEND:
-        outbox.append((tag + title, body, pr))
+    daily_summary = ALWAYS_SEND and (slot == "evening" or manual)
+    if changed or daily_summary:
+        outbox.append(msg(tag + title, push, pr, tags, full))
     else:
-        print(f"No change worth a push ({title}).")
-        summary = os.getenv("GITHUB_STEP_SUMMARY")
-        if summary:
-            with open(summary, "a", encoding="utf-8") as f:
-                f.write(f"## {title} (no push)\n\n```\n{body}\n```\n")
+        print(f"No change worth a push ({title}).\n{push}")
+        write_summary(f"{title} (no push)", full)
 
-    local = now.astimezone(PT)
-    due = local.weekday() == OUTLOOK_WEEKDAY and local.hour >= OUTLOOK_HOUR
+    due = slot == "evening" and local.weekday() == OUTLOOK_WEEKDAY
     if args.weekend or (due and state.get("last_outlook") != local.date().isoformat()):
-        ot, ob = build_outlook(c, flow, wxu, wxl, rec)
-        outbox.append((tag + ot, ob, "3"))
+        ot, opush, ofull = build_outlook(c, flow, wxu, wxl, rec)
+        outbox.append(msg(tag + ot, opush, "3", ["calendar"], ofull))
         state["last_outlook"] = local.date().isoformat()
 
     state["last_run"] = now.isoformat()
