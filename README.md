@@ -39,7 +39,7 @@ There are three buttons: **Gauge**, **Regs** and **Full report**. Full report op
 ## Setup
 1. Install the **ntfy** app and subscribe to a random topic, e.g. `cowichan-x7k2q9`. Anyone who knows the topic can read it.
 2. Create a **private** GitHub repo containing `cowichan_alert.py` and `.github/workflows/cowichan-alert.yml`.
-3. Under Settings → Secrets and variables → Actions:
+3. Under Settings → Secrets and variables → Actions (the topic name only; a full ntfy URL also works):
    - Add the secret `NTFY_TOPIC`.
    - Optionally set the variable `ALWAYS_SEND=true` to get every run while you calibrate.
 4. Go to Actions → Cowichan fishing alert → Run workflow. Tick "weekend outlook" to test that too.
@@ -67,6 +67,11 @@ Everything you'd want to adjust is at the top of the script:
 - `DROUGHT_FLOW`.
 
 The weekend projection is the weakest part. It's a simple recession-plus-rain model and should be backtested before you trust its numbers.
+
+## Troubleshooting
+- **Testing after an edit:** use **Run workflow**, not **Re-run**. A re-run replays the original commit, so it runs the old code.
+- **A red X:** open the run, then the `check` job, then the step with the red mark. ntfy errors print the reason, for example a `NTFY_TOPIC` that isn't a plain topic name.
+- **"Could not save state.json" warning:** the run still worked; an alert may repeat once.
 
 ## Limits
 - The regulation calendar expires with the synopsis on 2027-03-31. Alerts will warn you after that date.
