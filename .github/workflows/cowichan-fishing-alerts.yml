@@ -2,10 +2,12 @@ name: Cowichan fishing alert
 
 on:
   schedule:
-    # GitHub cron is UTC. 13:00 UTC = 6am PDT / 5am PST.
-    # 00:00 UTC = 5pm PDT / 4pm PST; on Thursdays this run also sends the weekend outlook.
-    - cron: "0 13 * * *"
-    - cron: "0 0 * * *"
+    # GitHub cron is UTC, so each run is listed twice (one for PDT, one for PST).
+    # The script runs whichever matches today's clock and skips the other in seconds.
+    - cron: "37 11 * * *"   # 4:37am PDT
+    - cron: "37 12 * * *"   # 4:37am PST
+    - cron: "7 0 * * *"     # 5:07pm PDT (Thursday's run adds the weekend outlook)
+    - cron: "7 1 * * *"     # 5:07pm PST
   workflow_dispatch:
     inputs:
       weekend:
@@ -33,6 +35,7 @@ jobs:
         env:
           NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
           ALWAYS_SEND: ${{ vars.ALWAYS_SEND }}
+          SCHEDULE: ${{ github.event.schedule }}
         run: python cowichan_alert.py ${{ inputs.weekend && '--weekend' || '' }}
       - name: Save alert state
         if: always()
