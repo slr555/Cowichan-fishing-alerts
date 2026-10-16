@@ -28,6 +28,9 @@ import html.parser
 import io
 import json
 import os
+import re
+import sys
+import urllib.error
 import urllib.parse
 import urllib.request
 from dataclasses import dataclass, field
@@ -46,7 +49,9 @@ WX_UPPER = (48.82, -124.05)  # Lake Cowichan: rain that moves the river
 WX_LOWER = (48.78, -123.71)  # Duncan: temperature, barometer, cloud, sun
 
 NTFY_SERVER = os.getenv("NTFY_SERVER", "https://ntfy.sh")
-NTFY_TOPIC = os.getenv("NTFY_TOPIC", "")
+NTFY_TOPIC = os.getenv("NTFY_TOPIC", "").strip()
+if "://" in NTFY_TOPIC:                      # accept a pasted URL like https://ntfy.sh/my-topic
+    NTFY_TOPIC = NTFY_TOPIC.rstrip("/").rsplit("/", 1)[-1]
 ALWAYS_SEND = os.getenv("ALWAYS_SEND", "false").strip().lower() == "true"
 STATE_FILE = os.getenv("STATE_FILE", os.path.join(HERE, "state.json"))
 DFO_REGS_URL = os.getenv("DFO_REGS_URL", "https://www.pac.dfo-mpo.gc.ca/fm-gp/rec/fresh-douce/region1-eng.html")
@@ -930,9 +935,13 @@ def run_url():
 
 
 def send_ntfy(m):
+    """Push one message. Returns an error string, or None on success."""
     if not NTFY_TOPIC:
         print(f"[no NTFY_TOPIC] would push: {m['title']}")
-        return
+        return None
+    if not re.fullmatch(r"[-_A-Za-z0-9]{1,64}", NTFY_TOPIC):
+        return ("NTFY_TOPIC must be just the topic name (letters, numbers, - and _, max 64), "
+                f"got {len(NTFY_TOPIC)} characters with other symbols in it")
     actions = [{"action": "view", "label": "Gauge", "url": GAUGE_LINK},
                {"action": "view", "label": "Regs", "url": DFO_PAGE}]
     if run_url():
@@ -941,8 +950,14 @@ def send_ntfy(m):
                "priority": int(m["priority"]), "tags": m["tags"], "click": m["click"], "actions": actions}
     req = urllib.request.Request(f"{NTFY_SERVER.rstrip('/')}/", data=json.dumps(payload).encode("utf-8"),
                                  method="POST", headers={"Content-Type": "application/json", **UA})
-    with urllib.request.urlopen(req, timeout=30) as r:
-        print(f"ntfy: HTTP {r.status} for '{m['title']}'")
+    try:
+        with urllib.request.urlopen(req, timeout=30) as r:
+            print(f"ntfy: HTTP {r.status} for '{m['title']}'")
+        return None
+    except urllib.error.HTTPError as e:
+        return f"ntfy rejected '{m['title']}': HTTP {e.code} {e.read().decode(errors='replace')[:200]}"
+    except Exception as e:  # noqa: BLE001
+        return f"ntfy push failed for '{m['title']}': {e}"
 
 
 def write_summary(title, text):
@@ -952,12 +967,18 @@ def write_summary(title, text):
             f.write(f"## {title}\n\n```\n{text}\n```\n")
 
 
+PUSH_ERRORS = []
+
+
 def flush(outbox, dry_run):
     for m in outbox:
         print(f"\n=== {m['title']}  [p{m['priority']} {','.join(m['tags'])}] ===\n{m['push']}")
         write_summary(m["title"], m["full"])
         if not dry_run:
-            send_ntfy(m)
+            err = send_ntfy(m)
+            if err:
+                print(f"::error::{err}")
+                PUSH_ERRORS.append(err)
 
 
 def load_state():
@@ -1158,3 +1179,5 @@ def main():
 
 if __name__ == "__main__":
     main()
+    if PUSH_ERRORS:      # state is saved; fail the run so GitHub emails you
+        sys.exit(1)
