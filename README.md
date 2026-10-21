@@ -23,7 +23,8 @@ The bands and timing were replayed against 2006-2025 daily flows from the Duncan
 - **The river drops slowly.** Flow above the weir release falls about 15% a day, so "dropping after a freshet" lasts up to 14 days (`DROP_DAYS`). The weekend projection also uses the measured rate.
 - **Expected alert counts.** In the replay, a typical season gave about 2 GOOD alerts for coho, 4 for steelhead, 3 for the egg bite and 3 for spring trout, mostly in November (salmon, egg bite) and February-March (steelhead).
 - **No flip-flopping.** A GOOD window only closes below 6.5 (`GOOD_EXIT`). A window that reopens within 72 hours of its last alert stays quiet, and short blips under 24 hours get no "window closing" note.
-- **Weir releases** are detected against the lowest outflow of the past 72 hours, so gradual step-ups like fall 2025 are caught.
+- **Weir releases** are detected as a rise of 20% and 1 m³/s or more against the lowest outflow of the past 72 hours. That catches gradual step-ups like fall 2025, and small drought-year steps like 5.5 → 7 m³/s in October 2026 (`WEIR_JUMP`).
+- **The egg bite doesn't wait for rain.** It normally builds after the first fall freshet or weir release. In a dry fall, a date-based floor brings it up from October 25 to full strength by November 5 anyway, since chinook spawn regardless and returns have topped 10,000 every year since 2017 (`EGG_RAMP`).
 
 The replay used daily averages and neutral weather, so it checks that the alert behaves sensibly, not that the fishing was good. Your own results are still the best tuning.
 
