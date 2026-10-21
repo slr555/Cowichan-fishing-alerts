@@ -9,13 +9,23 @@ Runs twice a day on GitHub Actions, at about 4:37am and 5:07pm Pacific. It reads
 - **Its own health:** a failed or stale gauge feed sends a "data problem" alert (at most once a day), then a "data feeds back" note when it recovers. The regulation watcher alerts after 3 failed reads in a row, which usually means a page was redesigned.
 
 ## Fisheries scored
-| Fishery | Season | Good flow (m3/s) | Notes |
+| Fishery | Season | Sweet spot / fishable (m3/s) | Notes |
 |---|---|---|---|
-| Coho | Oct to Jan (peak Nov) | 15-60 | bonus for fresh-fish push flows of 28-45 |
-| Chum | Oct to Dec | 12-80 | retention TBD, treated as C&R |
-| Winter steelhead | Dec to Apr (peak Feb-Mar) | 25-90, fishable to 150 | "fish the soft edges" note at high flow |
-| Trout egg bite | Oct to Jan | 10-45 | ramps up after the first fall freshet or weir pulse |
-| Spring trout | Mar to Jun | 8-40 | salmon-fry streamer bonus from late March |
+| Coho | Oct to Jan (peak Nov) | 20-80 / 10-130 | bonus for fresh-fish push flows of 28-45 |
+| Chum | Oct to Dec | 15-90 / 8-140 | retention TBD, treated as C&R |
+| Winter steelhead | Dec to Apr (peak Feb-Mar) | 25-100 / 12-160 | "fish the soft edges" note at high flow |
+| Trout egg bite | Oct to Jan | 10-80 / 6-120 | ramps up after the first fall freshet or weir release |
+| Spring trout | Mar to Jun | 8-45 / 5-80 | salmon-fry streamer bonus from late March |
+
+### How the numbers were calibrated
+The bands and timing were replayed against 2006-2025 daily flows from the Duncan gauge (08HA011) and the weir gauge (08HA002):
+- **Winter flows are high.** The median is 77 m³/s in November, 97 in December and 108 in January, so the bands are sized for that.
+- **The river drops slowly.** Flow above the weir release falls about 15% a day, so "dropping after a freshet" lasts up to 14 days (`DROP_DAYS`). The weekend projection also uses the measured rate.
+- **Expected alert counts.** In the replay, a typical season gave about 2 GOOD alerts for coho, 4 for steelhead, 3 for the egg bite and 3 for spring trout, mostly in November (salmon, egg bite) and February-March (steelhead).
+- **No flip-flopping.** A GOOD window only closes below 6.5 (`GOOD_EXIT`). A window that reopens within 72 hours of its last alert stays quiet, and short blips under 24 hours get no "window closing" note.
+- **Weir releases** are detected against the lowest outflow of the past 72 hours, so gradual step-ups like fall 2025 are caught.
+
+The replay used daily averages and neutral weather, so it checks that the alert behaves sensibly, not that the fishing was good. Your own results are still the best tuning.
 
 Every score is gated by the regulation calendar in `open_sections()`, built from the 2025-2027 synopsis and the DFO table. If nothing is open for a species on that date, it scores 0. A drought hold caps scores in Sep-Oct when Duncan is below 7 m3/s.
 
@@ -84,7 +94,7 @@ Everything you'd want to adjust is at the top of the script:
 - `PROJ`: the weekend flow projection.
 - `DROUGHT_FLOW`.
 
-The weekend projection is the weakest part. It's a simple recession-plus-rain model and should be backtested before you trust its numbers.
+The weekend projection's drop rate is measured, but how much a given rainfall raises the river (`k_*` in `PROJ`) is still a guess, so treat its flow numbers as direction more than value.
 
 ## Troubleshooting
 - **Testing after an edit:** use **Run workflow**, not **Re-run**. A re-run replays the original commit, so it runs the old code.
