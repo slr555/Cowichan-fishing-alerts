@@ -78,6 +78,11 @@ DFO_REGS_URL = os.getenv("DFO_REGS_URL", "https://www.pac.dfo-mpo.gc.ca/fm-gp/re
 BC_REGS_URL = os.getenv("BC_REGS_URL", "https://www2.gov.bc.ca/gov/content/sports-culture/recreation/fishing-hunting/fishing/fishing-regulations")
 
 GOOD, FAIR = 7.0, 5.0
+GOOD_EXIT = 6.5           # a GOOD window only closes when the score falls below this (no flip-flopping)
+REOPEN_QUIET_HOURS = 72   # a window that reopens within 72 h of its last GOOD alert doesn't alert again
+BLIP_HOURS = 24           # no "window closing" note for a window that lasted less than this
+DROP_DAYS = 14            # the Cowichan drops slowly: "dropping after a freshet" lasts up to 14 days
+WEIR_JUMP = (1.3, 2.0)    # flow out of the lake up 30% and 2+ m3/s vs the lowest of the past 72 h
 DROUGHT_FLOW = 7.0        # Sep-Oct below this at Duncan: no GOOD alerts
 STALE_HOURS = 12          # gauge reading older than this = feed problem
 REG_FAILS_BEFORE_ALERT = 3
@@ -86,32 +91,34 @@ OUTLOOK_WEEKDAY = 3                  # weekend outlook goes out on Thursday's ev
 MAX_PUSH_BYTES = 3900     # ntfy turns longer messages into attachments
 REGS_VALID_UNTIL = date(2027, 3, 31)    # 2025-2027 synopsis
 
-# Rough flow projection for the weekend outlook (tune after backtesting).
+# Flow projection for the weekend outlook. Recession measured from 2006-2025 Duncan data:
+# flow above the weir release drops ~15% a day on the falling limb.
 # q_next = base + (q - base) * recession + k * rain_mm, base = weir release
-PROJ = {"recession": 0.7, "k_dry_fall": 0.4, "k_wet_fall": 0.8,
+PROJ = {"recession": 0.85, "k_dry_fall": 0.4, "k_wet_fall": 0.8,
         "k_winter": 1.5, "k_other": 0.6, "wet_fall_mm14": 40}
 
-# Flow bands in m3/s at 08HA011 (mean annual flow is ~53).
+# Flow bands in m3/s at 08HA011. Calibrated against 2006-2025 daily flows: winter is big here
+# (median Nov 77, Dec 97, Jan 108) and a GOOD day should be the exception, not the norm.
 SPECIES = [
     {"key": "coho", "name": "Coho", "kind": "salmon",
-     "season": {10: 0.6, 11: 1.0, 12: 0.6, 1: 0.2},
-     "good_flow": (15, 60), "fishable_flow": (8, 110), "style": "freshet",
+     "season": {10: 0.8, 11: 1.0, 12: 0.7, 1: 0.2},
+     "good_flow": (20, 80), "fishable_flow": (10, 130), "style": "freshet",
      "cold_limit": None, "heat_limit": None},
     {"key": "chum", "name": "Chum", "kind": "salmon",
-     "season": {10: 0.4, 11: 1.0, 12: 0.5},
-     "good_flow": (12, 80), "fishable_flow": (7, 120), "style": "freshet",
+     "season": {10: 0.5, 11: 1.0, 12: 0.5},
+     "good_flow": (15, 90), "fishable_flow": (8, 140), "style": "freshet",
      "cold_limit": None, "heat_limit": None},
     {"key": "steelhead", "name": "Winter steelhead", "kind": "steelhead",
      "season": {12: 0.5, 1: 0.8, 2: 1.0, 3: 1.0, 4: 0.5},
-     "good_flow": (25, 90), "fishable_flow": (12, 150), "style": "freshet",
+     "good_flow": (25, 100), "fishable_flow": (12, 160), "style": "freshet",
      "cold_limit": -3, "heat_limit": None},
     {"key": "egg", "name": "Trout egg bite", "kind": "trout",
      "season": {10: 0.7, 11: 1.0, 12: 1.0, 1: 0.7},
-     "good_flow": (10, 45), "fishable_flow": (6, 70), "style": "egg",
+     "good_flow": (10, 80), "fishable_flow": (6, 120), "style": "egg",
      "cold_limit": None, "heat_limit": None},
     {"key": "spring", "name": "Spring trout", "kind": "trout",
      "season": {3: 0.6, 4: 1.0, 5: 0.9, 6: 0.6},
-     "good_flow": (8, 40), "fishable_flow": (5, 70), "style": "stable",
+     "good_flow": (8, 45), "fishable_flow": (5, 80), "style": "stable",
      "cold_limit": None, "heat_limit": 25},
 ]
 
@@ -134,7 +141,7 @@ CARDS = {
                 "treble swapped for a single barbless siwash; 3/8 oz pink/purple twitching jig; "
                 "Corky or Spin-N-Glo in pink/orange",
         "fly": "8 wt sink tip, pink or chartreuse Clouser or rabbit strip",
-        "play": "Fresh fish push on the rise; fish the drop 1-3 days after",
+        "play": "Fresh fish push on the rise; fish the drop as it clears (it falls slowly here)",
         "timing": "first light",
         "extra": "Retaining salmon needs the non-tidal salmon stamp.",
     },
@@ -194,7 +201,7 @@ SECTION_SHORT = {
 SHORT_CARDS = {
     "coho": {"gear": "Vibrex #3-4 brass/chartreuse on a single barbless siwash · 3/8 oz pink jig",
              "fly": "8 wt sink tip, pink or chartreuse Clouser",
-             "play": "Fish the drop 1-3 days after the push", "when": "first light",
+             "play": "Fish the drop as it clears after the push", "when": "first light",
              "note": "Non-tidal salmon stamp to keep one"},
     "chum": {"gear": "Chartreuse/pink spinner or jig",
              "fly": "8 wt, chartreuse streamer",
@@ -292,7 +299,7 @@ def _flow_from_datamart(station):
     return []
 
 
-def fetch_flow(station, days=14):
+def fetch_flow(station, days=21):
     errors = []
     for fn in (lambda: _flow_from_ogc(station, days), lambda: _flow_from_datamart(station)):
         try:
@@ -377,12 +384,23 @@ def wvals(wx, t0, t1, key):
     return [h[key] for h in wx if t0 <= h["t"] < t1 and h[key] is not None]
 
 
+def weir_low72(weir, t):
+    vals = [v for tt, v in weir if t - timedelta(hours=72) <= tt < t]
+    return min(vals) if vals else weir[-1][1]
+
+
+def weir_jump(now_q, low_q):
+    """Gradual releases (e.g. fall 2025) step up a little each day, so compare to the 72 h low."""
+    return low_q > 0 and now_q >= WEIR_JUMP[0] * low_q and now_q - low_q >= WEIR_JUMP[1]
+
+
 def classify(q, q24, peak, mn, hrs_peak):
+    """peak = highest flow in the last DROP_DAYS; mn = lowest flow in a slightly longer window."""
     trend = (q - q24) / q24 if q24 else 0.0
     freshet = peak >= 1.5 * mn and peak >= 15
     if trend > 0.15:
         return "rising", trend
-    if freshet and q < 0.9 * peak and 6 <= hrs_peak <= 120 and trend < 0.02:
+    if freshet and q < 0.9 * peak and 6 <= hrs_peak <= DROP_DAYS * 24 and trend < 0:
         return "dropping after freshet", trend
     if trend < -0.10:
         return "dropping", trend
@@ -396,9 +414,9 @@ def hhmm(iso):
 def analyse(flow, weir, wxu, wxl, now):
     t_last, q_now = flow[-1]
     q24 = value_at(flow, t_last - timedelta(hours=24))
-    last7 = [(t, v) for t, v in flow if t >= t_last - timedelta(days=7)] or flow
-    t_peak, peak = max(last7, key=lambda x: x[1])
-    mn = min(v for _, v in last7)
+    recent = [(t, v) for t, v in flow if t >= t_last - timedelta(days=DROP_DAYS)] or flow
+    t_peak, peak = max(recent, key=lambda x: x[1])
+    mn = min(v for t, v in flow if t >= t_last - timedelta(days=DROP_DAYS + 3))
     hrs_peak = (t_last - t_peak).total_seconds() / 3600
     phase, trend = classify(q_now, q24, peak, mn, hrs_peak)
     last10 = [v for t, v in flow if t >= t_last - timedelta(days=10)]
@@ -408,8 +426,8 @@ def analyse(flow, weir, wxu, wxl, now):
     pulse = False
     if weir:
         weir_q = weir[-1][1]
-        weir_24 = value_at(weir, weir[-1][0] - timedelta(hours=24))
-        pulse = 5 <= day.month <= 11 and weir_q >= 1.3 * weir_24 and weir_q - weir_24 >= 2
+        weir_24 = weir_low72(weir, weir[-1][0])   # "from" value: lowest of the past 72 h
+        pulse = 5 <= day.month <= 11 and weir_jump(weir_q, weir_24)
 
     hl = wxl["hourly"]
     p0 = wvals(hl, now - timedelta(hours=7), now - timedelta(hours=5), "pressure")
@@ -452,11 +470,9 @@ def detect_fall_freshet(flow, weir, season_start):
                 hits.append(t)
                 break
     for t, q in weir:
-        if t >= season_start:
-            q24 = value_at(weir, t - timedelta(hours=24))
-            if q >= 1.3 * q24 and q - q24 >= 2:
-                hits.append(t)
-                break
+        if t >= season_start and weir_jump(q, weir_low72(weir, t) if any(tt < t for tt, _ in weir) else q):
+            hits.append(t)
+            break
     return min(hits) if hits else None
 
 
@@ -580,14 +596,24 @@ def score_species(sp, c, egg_factor=1.0):
 
     if style == "freshet" and sp["season"].get(d.month, 0) >= 0.6:
         if q > hi and c.rain_next48 < 10 and q <= fhi * 1.5:
-            heads.append((f"{sp['key']}:window",
-                          f"{sp['name']}: window likely in ~1-3 days as flow drops into {lo}-{hi}"))
+            heads.append((f"{sp['key']}:window", f"{sp['name']}: {window_eta(q, hi, c.weir_q)}"))
         elif q < lo and c.rain_next48 >= 15:
             heads.append((f"{sp['key']}:freshen",
                           f"{sp['name']}: {c.rain_next48:.0f} mm coming should freshen the river, watch for fish pushing in 24-48h"))
     if s >= GOOD and c.rain_next24 >= 40:
         heads.append((f"{sp['key']}:blowout", f"{sp['name']}: good now but heavy rain likely blows it out by tomorrow"))
     return Score(sp, round(s, 1), why, heads, opens)
+
+
+def window_eta(q, hi, base):
+    """Days until flow drops to the top of the sweet spot, using the measured recession rate."""
+    import math
+    base = base if base is not None and base < hi else 0.0
+    r = PROJ["recession"]
+    if q <= hi or hi <= base:
+        return f"should come into range ({hi} m³/s) once the lake outflow drops"
+    days = max(1, math.ceil(math.log((hi - base) / (q - base)) / math.log(r)))
+    return f"window likely in ~{days} day{'s' if days != 1 else ''} as flow drops under {hi} m³/s"
 
 
 def tier(s):
@@ -657,11 +683,11 @@ def build_outlook(c, flow, wxu, wxl, freshet):
     for d in days:
         if d not in wxl["daily"]:
             continue
-        prev = [p for p in (series.get(d - timedelta(days=i)) for i in range(1, 8)) if p is not None]
+        prev = [p for p in (series.get(d - timedelta(days=i)) for i in range(1, DROP_DAYS + 4)) if p is not None]
         q = series[d]
-        window = [q] + prev[:6]
+        window = [q] + prev[:DROP_DAYS]
         peak = max(window)
-        phase, trend = classify(q, prev[0] if prev else q, peak, min(window), 24 * window.index(peak))
+        phase, trend = classify(q, prev[0] if prev else q, peak, min([q] + prev), 24 * window.index(peak))
         noon = datetime(d.year, d.month, d.day, 12, tzinfo=PT).astimezone(UTC)
         prs = wvals(hl, noon - timedelta(hours=24), noon - timedelta(hours=23), "pressure")
         prn = wvals(hl, noon, noon + timedelta(hours=1), "pressure")
@@ -699,7 +725,7 @@ def build_outlook(c, flow, wxu, wxl, freshet):
         full += ["", f"Best bet: {d:%a}, {sc.sp['name']} {sc.score}", strategy_card(sc, cd)]
     else:
         title = "Weekend: nothing worth the drive"
-    push += ["", "ℹ️ Flow projection is rough until it's calibrated"]
+    push += ["", "ℹ️ Flow projection is approximate: drop rate is measured, rain response is still a guess"]
     full += ["", f"Rules: {STANDING_RULES}"]
     return title, "\n".join(push), "\n".join(full)
 
@@ -890,7 +916,7 @@ def build_report(c, scores, general_heads):
              f"Phase: {c.phase}"]
     if c.weir_q is not None:
         lines.append(f"Weir {STATION_WEIR}: {c.weir_q:.1f} m3/s" +
-                     (f" (raised from {c.weir_24:.1f})" if c.weir_pulse else ""))
+                     (f" (up from {c.weir_24:.1f} in 72 h)" if c.weir_pulse else ""))
     lines += [f"Rain (Lake Cowichan): 72h {c.rain_past72:.0f} mm | next 24h {c.rain_next24:.0f} | next 48h {c.rain_next48:.0f}",
               f"Air {c.tmin_24:.0f} to {c.tmax_24:.0f} C | barometer {c.pressure_trend:+.0f} hPa/12h | "
               f"cloud {c.cloud_day:.0f}% | sun {c.sunrise}-{c.sunset}"]
@@ -912,16 +938,31 @@ def names(scores):
     return " & ".join(n) if len(n) <= 2 else ", ".join(n[:-1]) + " & " + n[-1]
 
 
-def decide(state, scores, heads, live):
-    """Returns title, priority, tags, changed?, change notes."""
+def decide(state, scores, heads, live, now=None):
+    """Returns title, priority, tags, changed?, change notes, kinds."""
     prev = state.get("tiers", {})
-    up = [s for s in scores if tier(s.score) == "GOOD" and prev.get(s.sp["key"]) != "GOOD"]
-    down = [s for s in scores if tier(s.score) != "GOOD" and prev.get(s.sp["key"]) == "GOOD"]
+    now = now or datetime.now(UTC)
+    sent = state.setdefault("good_alert_at", {})   # species -> when its last GOOD alert went out
+
+    def hours_since_alert(s):
+        t = sent.get(s.sp["key"])
+        return (now - datetime.fromisoformat(t)).total_seconds() / 3600 if t else 1e9
+
+    def held(s):   # GOOD, or a GOOD window that hasn't clearly closed yet
+        was = prev.get(s.sp["key"]) == "GOOD"
+        return s.score >= GOOD or (was and s.score >= GOOD_EXIT)
+
+    opened = [s for s in scores if s.score >= GOOD and prev.get(s.sp["key"]) != "GOOD"]
+    closed = [s for s in scores if not held(s) and prev.get(s.sp["key"]) == "GOOD"]
+    up = [s for s in opened if hours_since_alert(s) >= REOPEN_QUIET_HOURS]       # reopen blips stay quiet
+    down = [s for s in closed if hours_since_alert(s) >= BLIP_HOURS]
+    for s in up:
+        sent[s.sp["key"]] = now.isoformat()
     old_heads = set(state.get("heads", []))
     new_heads = [h for h in heads if h[0] not in old_heads]
-    state["tiers"] = {s.sp["key"]: tier(s.score) for s in scores}
+    state["tiers"] = {s.sp["key"]: ("GOOD" if held(s) else tier(s.score)) for s in scores}
     state["heads"] = [h[0] for h in heads]
-    good = [s for s in scores if tier(s.score) == "GOOD"]
+    good = [s for s in scores if held(s)]
     if up:
         title, pr, tags = f"{names(good)} GOOD on the Cowichan", "4", ["fish"]
     elif new_heads:
@@ -1141,7 +1182,7 @@ def main():
             if age > STALE_HOURS:
                 raise RuntimeError(f"gauge {STATION_LOWER} data is stale (last reading {age:.0f} h ago)")
             try:
-                weir = fetch_flow(STATION_WEIR, days=3)
+                weir = fetch_flow(STATION_WEIR, days=4)
             except Exception as e:  # noqa: BLE001
                 print(f"weir fetch failed (continuing): {e}")
                 weir = []
@@ -1180,10 +1221,10 @@ def main():
     scores = [score_species(sp, c, egg_activation(rec, c.day)) for sp in SPECIES]
     general = []
     if c.weir_pulse and c.day.month in (9, 10, 11):
-        general.append(("weir:pulse", f"Weir release raised {fq(c.weir_24)} → {fq(c.weir_q)} m³/s: salmon will "
+        general.append(("weir:pulse", f"Flow out of the lake up {fq(c.weir_24)} → {fq(c.weir_q)} m³/s: salmon will "
                                       "move, trout egg bite follows once chinook are on the redds"))
     lines, live, heads = build_report(c, scores, general)
-    title, pr, tags, changed, changes, kinds = decide(state, scores, heads, live)
+    title, pr, tags, changed, changes, kinds = decide(state, scores, heads, live, now)
 
     # Cards: GOOD species first, otherwise the species a heads-up is about.
     cards = [s for s in live if tier(s.score) == "GOOD"][:2]
