@@ -82,7 +82,9 @@ GOOD_EXIT = 6.5           # a GOOD window only closes when the score falls below
 REOPEN_QUIET_HOURS = 72   # a window that reopens within 72 h of its last GOOD alert doesn't alert again
 BLIP_HOURS = 24           # no "window closing" note for a window that lasted less than this
 DROP_DAYS = 14            # the Cowichan drops slowly: "dropping after a freshet" lasts up to 14 days
-WEIR_JUMP = (1.3, 2.0)    # flow out of the lake up 30% and 2+ m3/s vs the lowest of the past 72 h
+WEIR_JUMP = (1.2, 1.0)    # flow out of the lake up 20% and 1+ m3/s vs the lowest of the past 72 h
+                          # (catches small drought-year steps like 5.5 -> 7 in Oct 2026)
+EGG_RAMP = ((10, 25), (11, 5))   # chinook are on the redds by these dates even in a dry fall
 DROUGHT_FLOW = 7.0        # Sep-Oct below this at Duncan: no GOOD alerts
 STALE_HOURS = 12          # gauge reading older than this = feed problem
 REG_FAILS_BEFORE_ALERT = 3
@@ -477,11 +479,26 @@ def detect_fall_freshet(flow, weir, season_start):
 
 
 def egg_activation(freshet, d):
-    """Egg bite ramps up as chinook get onto the redds after the first fall freshet."""
+    """Egg bite ramps up as chinook get onto the redds.
+
+    Normally that follows the first fall freshet or weir release. In a dry fall the chinook
+    spawn anyway (returns have topped 10,000 every year since 2017), so a date-based floor
+    builds from Oct 25 to full strength by Nov 5 regardless of flows.
+    """
     if freshet is None:
-        return 0.3
-    days = (d - freshet.astimezone(PT).date()).days
-    return 0.4 if days < 3 else 0.7 if days < 7 else 1.0
+        by_flow = 0.3
+    else:
+        days = (d - freshet.astimezone(PT).date()).days
+        by_flow = 0.4 if days < 3 else 0.7 if days < 7 else 1.0
+    yr = d.year if d.month >= 9 else d.year - 1
+    start, full = date(yr, *EGG_RAMP[0]), date(yr, *EGG_RAMP[1])
+    if d < start:
+        floor = 0.0
+    elif d >= full:
+        floor = 1.0
+    else:
+        floor = 0.4 + 0.6 * (d - start).days / (full - start).days
+    return max(by_flow, floor)
 
 # =============================== SCORING ===================================
 
