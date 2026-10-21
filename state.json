@@ -6,7 +6,7 @@
   "good_alert_at": {},
   "heads": [],
   "last_outlook": "2026-10-21",
-  "last_run": "2026-10-21T15:53:16.305912+00:00",
+  "last_run": "2026-10-21T16:04:53.823771+00:00",
   "regs": {
     "BC in-season changes": {
       "alerted": false,
@@ -24,7 +24,7 @@
     }
   },
   "season": {
-    "fall_freshet": null,
+    "fall_freshet": "2026-10-18T16:55:00+00:00",
     "key": 2026
   },
   "tiers": {
