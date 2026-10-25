@@ -4,11 +4,9 @@
     "count": 0
   },
   "good_alert_at": {},
-  "heads": [
-    "coho:freshen"
-  ],
+  "heads": [],
   "last_outlook": "2026-10-22",
-  "last_run": "2026-10-25T04:27:46.159373+00:00",
+  "last_run": "2026-10-25T15:02:09.304655+00:00",
   "regs": {
     "BC in-season changes": {
       "alerted": false,
