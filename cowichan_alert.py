@@ -221,6 +221,8 @@ SHORT_CARDS = {
                "play": "Browns are hunting salmon fry", "when": "first and last light", "note": ""},
 }
 DFO_PAGE = "https://www.pac.dfo-mpo.gc.ca/fm-gp/rec/fresh-douce/region1-eng.html"
+BC_PAGE = "https://www2.gov.bc.ca/gov/content/sports-culture/recreation/fishing-hunting/fishing/fishing-regulations"
+SITE_DIR = os.getenv("SITE_DIR", os.path.join(HERE, "docs"))   # GitHub Pages folder
 
 # ============================ REG CALENDAR =================================
 
@@ -301,7 +303,7 @@ def _flow_from_datamart(station):
     return []
 
 
-def fetch_flow(station, days=21):
+def fetch_flow(station, days=30):
     errors = []
     for fn in (lambda: _flow_from_ogc(station, days), lambda: _flow_from_datamart(station)):
         try:
@@ -810,6 +812,7 @@ def bc_cowichan_rows(page):
 def check_regs(state, now):
     msgs = []
     regs = state.setdefault("regs", {})
+    state["regs_checked_at"] = now.isoformat()
     for src, url, parse in (("DFO salmon table", DFO_REGS_URL, dfo_cowichan_rows),
                             ("BC in-season changes", BC_REGS_URL, bc_cowichan_rows)):
         st = regs.setdefault(src, {"rows": None, "fails": 0, "alerted": False})
@@ -1099,6 +1102,53 @@ def save_state(state):
         json.dump(state, f, indent=2, sort_keys=True, default=str)
 
 
+# ============================== WEB PAGE ===================================
+
+
+def export_site(c, scores, flow, weir, wxu, wxl, state, now):
+    """Write docs/config.json (all tuning, read by the page) and docs/snapshot.json
+    (last run's data, used by the page if live gauge data can't be fetched)."""
+    os.makedirs(SITE_DIR, exist_ok=True)
+
+    def jsonable(sp):
+        return {**sp, "season": {str(k): v for k, v in sp["season"].items()}}
+
+    cfg = {
+        "version": 1,
+        "stations": {"lower": STATION_LOWER, "weir": STATION_WEIR},
+        "wx_upper": WX_UPPER, "wx_lower": WX_LOWER,
+        "GOOD": GOOD, "FAIR": FAIR, "GOOD_EXIT": GOOD_EXIT, "DROP_DAYS": DROP_DAYS,
+        "WEIR_JUMP": WEIR_JUMP, "EGG_RAMP": EGG_RAMP, "PROJ": PROJ,
+        "DROUGHT_FLOW": DROUGHT_FLOW, "STALE_HOURS": STALE_HOURS,
+        "REGS_VALID_UNTIL": REGS_VALID_UNTIL.isoformat(),
+        "SPECIES": [jsonable(sp) for sp in SPECIES],
+        "SECTIONS": SECTIONS, "SECTION_SHORT": SECTION_SHORT,
+        "CARDS": CARDS, "SHORT_CARDS": SHORT_CARDS, "STANDING_RULES": STANDING_RULES,
+        "links": {"dfo": DFO_PAGE, "bc": BC_PAGE, "gauge": GAUGE_LINK},
+    }
+
+    def wx(w):
+        return {"hourly": [[h["t"].isoformat(), h["precip"], h["temp"], h["pressure"], h["cloud"]] for h in w["hourly"]],
+                "daily": {d.isoformat(): v for d, v in w["daily"].items()}}
+
+    snap = {
+        "generated_at": now.isoformat(),
+        "flow": {STATION_LOWER: [[t.isoformat(), v] for t, v in flow],
+                 STATION_WEIR: [[t.isoformat(), v] for t, v in weir]},
+        "wx": {"upper": wx(wxu), "lower": wx(wxl)},
+        "season": state.get("season"),
+        "history": state.get("history", [])[-40:],
+        "regs": {k: {"rows": v.get("rows"), "fails": v.get("fails", 0)} for k, v in state.get("regs", {}).items()},
+        "regs_checked_at": state.get("regs_checked_at"),
+        "python": {"phase": c.phase, "q_now": c.q_now,
+                   "scores": {s.sp["key"]: s.score for s in scores}},   # for checking the page's maths
+    }
+    for name, data in (("config.json", cfg), ("snapshot.json", snap)):
+        with open(os.path.join(SITE_DIR, name), "w", encoding="utf-8") as f:
+            json.dump(data, f, separators=(",", ":"), default=str)
+    print(f"web page data written to {SITE_DIR}")
+
+
 # =============================== DEMOS =====================================
 
 
@@ -1165,6 +1215,7 @@ def main():
     ap.add_argument("--weekend", action="store_true", help="force the weekend outlook")
     ap.add_argument("--skip-regs", action="store_true")
     ap.add_argument("--demo", choices=sorted(DEMOS))
+    ap.add_argument("--site", action="store_true", help="also write the web page data (on by default for real runs)")
     args = ap.parse_args()
 
     bad = (FRIEND_ALERTS - ALERT_KINDS) if FRIEND_TOPIC else set()
@@ -1199,7 +1250,7 @@ def main():
             if age > STALE_HOURS:
                 raise RuntimeError(f"gauge {STATION_LOWER} data is stale (last reading {age:.0f} h ago)")
             try:
-                weir = fetch_flow(STATION_WEIR, days=4)
+                weir = fetch_flow(STATION_WEIR, days=30)
             except Exception as e:  # noqa: BLE001
                 print(f"weir fetch failed (continuing): {e}")
                 weir = []
@@ -1282,6 +1333,14 @@ def main():
 
     state["last_run"] = now.isoformat()
     flush(outbox, args.dry_run)
+    if not args.dry_run:
+        hist = state.setdefault("history", [])
+        for m in outbox:
+            hist.append({"t": now.isoformat(), "title": m["title"], "kinds": sorted(m["kinds"]),
+                         "priority": m["priority"]})
+        del hist[:-40]
+    if (persist and not args.demo) or args.site:
+        export_site(c, scores, flow, weir, wxu, wxl, state, now)
     if persist:
         save_state(state)
 
