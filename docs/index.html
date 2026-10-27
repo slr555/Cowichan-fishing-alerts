@@ -1,0 +1,1024 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Cowichan River conditions</title>
+<meta name="description" content="Live Cowichan River flows, weather, fishing scores, gauges map and regulations.">
+<meta name="theme-color" content="#eef2f0" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#0d1a19" media="(prefers-color-scheme: dark)">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎣</text></svg>">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600&family=Barlow+Condensed:wght@500;600;700&display=swap">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<style>
+:root {
+  --bg: #eef2f0;          /* mist */
+  --surface: #f8faf9;
+  --ink: #10302e;         /* deep pool */
+  --muted: #5d716d;
+  --line: #ccd6d2;        /* gravel */
+  --riffle: #2f6f68;      /* data teal */
+  --riffle-soft: #2f6f6829;
+  --riffle-softer: #2f6f6814;
+  --lake: #7a8f8b;
+  --coho: #a8253a;        /* spawning coho, used for "now" only */
+  --good: #2e7d4f;
+  --fair: #a77d16;
+  --poor: #8c9794;
+  --warn-bg: #fbf1dc;
+  --warn-ink: #6b4d06;
+  --display: "Barlow Condensed", "Arial Narrow", "Roboto Condensed", sans-serif;
+  --body: "Barlow", "Helvetica Neue", Arial, sans-serif;
+  color-scheme: light;
+  box-sizing: border-box;
+  padding-top: env(safe-area-inset-top, 0px);
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0d1a19; --surface: #132423; --ink: #dde7e3; --muted: #93a6a1; --line: #29403d;
+    --riffle: #73b9ad; --riffle-soft: #73b9ad33; --riffle-softer: #73b9ad18; --lake: #8aa09b;
+    --coho: #ec6a7d; --good: #5bbf85; --fair: #d9ad43; --poor: #7d8d89;
+    --warn-bg: #3a2e12; --warn-ink: #f0d79a;
+    color-scheme: dark;
+  }
+  .leaflet-tile-pane { filter: brightness(.78) saturate(.7); }
+}
+*, *::before, *::after { box-sizing: inherit; }
+html { scroll-padding-top: env(safe-area-inset-top, 0px); }
+body {
+  margin: 0; background: var(--bg); color: var(--ink);
+  font: 400 17px/1.5 var(--body); -webkit-font-smoothing: antialiased;
+}
+a { color: var(--riffle); text-underline-offset: 2px; }
+:focus-visible { outline: 3px solid var(--riffle); outline-offset: 2px; border-radius: 2px; }
+.wrap { max-width: 1080px; margin: 0 auto; padding: 0 20px; }
+.num { font-variant-numeric: tabular-nums; }
+
+/* header */
+.top { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 18px; padding: 22px 0 6px; }
+.top h1 { font: 700 30px/1 var(--display); letter-spacing: .01em; margin: 0; }
+.status { color: var(--muted); font-size: 15px; margin: 0; flex: 1 1 260px; }
+.status.live::before { content: ""; display: inline-block; width: 8px; height: 8px; border-radius: 50%;
+  background: var(--good); margin-right: 7px; vertical-align: 1px; }
+.status.stale::before { content: ""; display: inline-block; width: 8px; height: 8px; border-radius: 50%;
+  background: var(--fair); margin-right: 7px; vertical-align: 1px; }
+button.refresh { font: 600 15px var(--body); color: var(--ink); background: transparent; border: 1px solid var(--line);
+  border-radius: 6px; padding: 6px 12px; cursor: pointer; }
+button.refresh:hover { border-color: var(--riffle); }
+
+/* hero */
+.hero { padding: 18px 0 8px; }
+.verdict { font: 700 clamp(36px, 7.2vw, 64px)/1.02 var(--display); margin: 0 0 10px; max-width: 18ch; letter-spacing: -.005em; }
+.verdict-sub { font-size: 19px; max-width: 62ch; margin: 0 0 18px; color: var(--ink); }
+.gauge { margin: 4px 0 6px; }
+.gauge svg { width: 100%; height: auto; display: block; overflow: visible; }
+.gauge-note { font-size: 14px; color: var(--muted); margin: 4px 0 0; }
+
+section.block { padding: 30px 0 6px; border-top: 1px solid var(--line); margin-top: 26px; }
+section.block > h2 { font: 700 26px/1.1 var(--display); margin: 0 0 14px; }
+h3 { font: 600 20px/1.2 var(--display); margin: 18px 0 8px; }
+.lede { color: var(--muted); font-size: 15px; margin: -6px 0 14px; max-width: 70ch; }
+
+/* fisheries */
+.fish { list-style: none; margin: 0; padding: 0; }
+.fish li { display: grid; grid-template-columns: minmax(150px, 220px) 76px 1fr; gap: 4px 18px; align-items: baseline;
+  padding: 12px 0; border-bottom: 1px solid var(--line); }
+.fish .name { font: 600 21px/1.15 var(--display); }
+.fish .score { font: 700 30px/1 var(--display); font-variant-numeric: tabular-nums; }
+.fish .score small { font: 600 14px var(--body); display: block; margin-top: 2px; }
+.fish .why { color: var(--ink); font-size: 16px; }
+.fish .why .where { display: block; color: var(--muted); font-size: 14px; margin-top: 2px; }
+.bar { height: 6px; background: var(--riffle-softer); border-radius: 3px; margin-top: 6px; grid-column: 1 / 2; }
+.bar i { display: block; height: 100%; border-radius: 3px; }
+.t-GOOD { color: var(--good); } .t-FAIR { color: var(--fair); } .t-POOR { color: var(--poor); }
+.b-GOOD { background: var(--good); } .b-FAIR { background: var(--fair); } .b-POOR { background: var(--poor); }
+.offseason { color: var(--muted); font-size: 15px; margin: 10px 0 0; }
+
+/* conditions */
+.stats { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 18px 22px; margin: 0; }
+.stats div { border-left: 3px solid var(--riffle-soft); padding-left: 12px; }
+.stats dt { font-size: 14px; color: var(--muted); }
+.stats dd { margin: 0; font: 600 24px/1.15 var(--display); font-variant-numeric: tabular-nums; }
+.stats dd small { font: 400 14px/1.3 var(--body); color: var(--muted); display: block; }
+
+.heads { margin: 18px 0 0; padding: 0; list-style: none; }
+.heads li { background: var(--warn-bg); color: var(--warn-ink); padding: 10px 14px; border-radius: 6px; margin: 0 0 8px; font-weight: 500; }
+
+/* map */
+.map-grid { display: grid; grid-template-columns: 1.35fr 1fr; gap: 20px; align-items: start; }
+#map { height: 440px; border-radius: 8px; border: 1px solid var(--line); background: var(--surface); }
+.map-fallback { padding: 18px; color: var(--muted); }
+.st-table { width: 100%; border-collapse: collapse; font-size: 15px; }
+.st-table th { text-align: left; font-weight: 600; color: var(--muted); font-size: 13px; padding: 6px 6px 6px 0; border-bottom: 1px solid var(--line); }
+.st-table td { padding: 8px 6px 8px 0; border-bottom: 1px solid var(--line); vertical-align: top; font-variant-numeric: tabular-nums; }
+.st-table td.nm { font-weight: 600; }
+.st-table td.nm small { display: block; font-weight: 400; color: var(--muted); }
+.st-table tr.key td.nm { color: var(--riffle); }
+.st-table button.go { all: unset; cursor: pointer; }
+.st-table button.go:focus-visible { outline: 3px solid var(--riffle); }
+.up { color: var(--coho); } .down { color: var(--riffle); }
+.pin { font: 600 13px/1 var(--body); color: #fff; background: var(--riffle); border-radius: 12px; padding: 5px 8px;
+  white-space: nowrap; box-shadow: 0 1px 2px #0005; transform: translate(-50%, -50%); display: inline-block; }
+.pin.key { background: var(--ink); color: var(--bg); }
+.pin-wrap { background: none; border: none; }
+.leaflet-popup-content { font: 400 14px/1.45 var(--body); margin: 12px 14px; }
+.leaflet-popup-content b { font-family: var(--display); font-size: 17px; }
+
+/* hydrograph */
+.chart { position: relative; }
+.chart svg { width: 100%; height: auto; display: block; touch-action: pan-y; }
+.legend { display: flex; flex-wrap: wrap; gap: 6px 18px; font-size: 14px; color: var(--muted); margin: 8px 0 0; padding: 0; list-style: none; }
+.legend i { display: inline-block; width: 18px; height: 3px; vertical-align: 4px; margin-right: 6px; border-radius: 2px; }
+.tip { position: absolute; pointer-events: none; background: var(--surface); border: 1px solid var(--line); border-radius: 6px;
+  padding: 6px 9px; font-size: 13px; line-height: 1.35; white-space: nowrap; display: none; box-shadow: 0 2px 6px #0002; }
+
+/* forecast */
+.days { display: grid; grid-template-columns: repeat(7, 1fr); gap: 8px; }
+.day { text-align: center; padding: 8px 2px 10px; border-radius: 6px; }
+.day.weekend { background: var(--riffle-softer); }
+.day .dname { font: 600 16px var(--display); }
+.day .rainbar { height: 64px; display: flex; align-items: flex-end; justify-content: center; margin: 6px 0 4px; }
+.day .rainbar i { width: 18px; background: var(--riffle); border-radius: 3px 3px 0 0; min-height: 2px; }
+.day .mm { font: 600 16px var(--display); font-variant-numeric: tabular-nums; }
+.day .tt { font-size: 13px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.outlook { list-style: none; padding: 0; margin: 0; }
+.outlook li { display: grid; grid-template-columns: 120px 1fr; gap: 2px 16px; padding: 10px 0; border-bottom: 1px solid var(--line); }
+.outlook .od { font: 600 19px var(--display); }
+.outlook .best .od::after { content: "  best"; color: var(--good); font-family: var(--body); font-size: 13px; font-weight: 600; }
+.outlook .ofl { color: var(--muted); font-size: 15px; }
+
+/* plans */
+.plans { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 26px 34px; }
+.plan h3 { margin-top: 0; }
+.plan h3 span { font-family: var(--body); font-size: 14px; font-weight: 600; margin-left: 8px; }
+.plan dl { margin: 0; display: grid; grid-template-columns: 64px 1fr; gap: 6px 12px; font-size: 15.5px; }
+.plan dt { color: var(--muted); font-size: 14px; padding-top: 1px; }
+.plan dd { margin: 0; }
+.flag { color: var(--warn-ink); background: var(--warn-bg); border-radius: 4px; padding: 0 5px; font-size: 13px; font-weight: 600; }
+
+/* regs */
+.regs { width: 100%; border-collapse: collapse; font-size: 15.5px; }
+.regs th { text-align: left; color: var(--muted); font-weight: 600; font-size: 13px; padding: 6px 10px 6px 0; border-bottom: 1px solid var(--line); }
+.regs td { padding: 9px 10px 9px 0; border-bottom: 1px solid var(--line); vertical-align: top; }
+.regs td.sec { width: 38%; }
+.regs td.sec b { font-family: var(--display); font-size: 17px; }
+.closed { color: var(--muted); }
+.rules { margin: 14px 0 0; max-width: 72ch; }
+.watch { color: var(--muted); font-size: 14.5px; margin-top: 12px; max-width: 75ch; }
+.watch ul { margin: 6px 0 0; padding-left: 18px; }
+
+.alerts { list-style: none; padding: 0; margin: 0; }
+.alerts li { padding: 8px 0; border-bottom: 1px solid var(--line); display: grid; grid-template-columns: 150px 1fr; gap: 12px; }
+.alerts time { color: var(--muted); font-size: 14px; font-variant-numeric: tabular-nums; }
+
+footer { color: var(--muted); font-size: 14px; padding: 36px 0 48px; border-top: 1px solid var(--line); margin-top: 34px; }
+footer p { max-width: 80ch; margin: 0 0 8px; }
+.err { background: var(--warn-bg); color: var(--warn-ink); padding: 12px 14px; border-radius: 6px; margin: 16px 0; }
+.skeleton { color: var(--muted); }
+
+@media (max-width: 820px) {
+  .map-grid { grid-template-columns: 1fr; }
+  #map { height: 340px; }
+  .fish li { grid-template-columns: 1fr 70px; }
+  .fish .why { grid-column: 1 / -1; }
+  .bar { grid-column: 1 / -1; }
+  .days { grid-template-columns: repeat(7, minmax(42px, 1fr)); overflow-x: auto; }
+  .outlook li { grid-template-columns: 1fr; }
+  .alerts li { grid-template-columns: 1fr; gap: 0; }
+  .regs td.sec { width: auto; }
+}
+@media (prefers-reduced-motion: no-preference) {
+  .now-line { animation: settle .7s ease-out both; }
+  @keyframes settle { from { opacity: 0; transform: translateY(-6px); } to { opacity: 1; transform: none; } }
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <h1>Cowichan River</h1>
+    <p class="status" id="status" role="status">Loading live gauge data</p>
+    <button class="refresh" id="refresh" type="button">Refresh</button>
+  </header>
+
+  <main>
+    <section class="hero" aria-labelledby="verdict">
+      <h2 class="verdict" id="verdict">Checking the river</h2>
+      <p class="verdict-sub" id="verdict-sub"></p>
+      <figure class="gauge" id="gauge" aria-label="Current flow against each fishery's flow range"></figure>
+    </section>
+
+    <section class="block" aria-labelledby="h-fish">
+      <h2 id="h-fish">Fisheries right now</h2>
+      <ol class="fish" id="fish"><li class="skeleton">Scores appear once the gauges load.</li></ol>
+      <p class="offseason" id="offseason"></p>
+    </section>
+
+    <section class="block" aria-labelledby="h-cond">
+      <h2 id="h-cond">River and weather</h2>
+      <dl class="stats" id="stats"></dl>
+      <ul class="heads" id="heads"></ul>
+    </section>
+
+    <section class="block" aria-labelledby="h-map">
+      <h2 id="h-map">Gauges</h2>
+      <p class="lede">Every Water Survey of Canada station reporting in and around the Cowichan watershed. Tap a station for its last day of readings.</p>
+      <div class="map-grid">
+        <div id="map" role="region" aria-label="Map of gauge stations"></div>
+        <table class="st-table" id="st-table" aria-label="Gauge stations"></table>
+      </div>
+    </section>
+
+    <section class="block" aria-labelledby="h-hydro">
+      <h2 id="h-hydro">Last 30 days</h2>
+      <div class="chart" id="hydro"><div class="tip" id="tip"></div></div>
+      <ul class="legend" id="legend"></ul>
+    </section>
+
+    <section class="block" aria-labelledby="h-fc">
+      <h2 id="h-fc">Next 7 days</h2>
+      <p class="lede">Rain at Lake Cowichan, where the water that moves the river falls. Temperatures at Duncan.</p>
+      <div class="days" id="days"></div>
+      <h3>Weekend outlook</h3>
+      <p class="lede" id="outlook-note">Projected flows use the river's measured drop rate. How much a given rain raises it is still an estimate.</p>
+      <ul class="outlook" id="outlook"></ul>
+    </section>
+
+    <section class="block" aria-labelledby="h-plans">
+      <h2 id="h-plans">How to fish it</h2>
+      <div class="plans" id="plans"></div>
+    </section>
+
+    <section class="block" aria-labelledby="h-regs">
+      <h2 id="h-regs">Open water today</h2>
+      <table class="regs" id="regs"></table>
+      <p class="rules" id="rules"></p>
+      <div class="watch" id="watch"></div>
+    </section>
+
+    <section class="block" aria-labelledby="h-alerts">
+      <h2 id="h-alerts">Recent alerts</h2>
+      <ul class="alerts" id="alerts"></ul>
+    </section>
+  </main>
+
+  <footer>
+    <p>Flows: Water Survey of Canada real-time data (provisional). Weather: Open-Meteo. Regulations: 2025-2027 BC freshwater synopsis and the DFO Region 1 salmon table.</p>
+    <p>Scores are a guide built from flow, trend, rain, temperature and season. Always read the current notices before you go.</p>
+    <p id="foot-run"></p>
+  </footer>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script>
+"use strict";
+// ============================================================================
+// CORE-BEGIN  (mirrors the scoring in cowichan_alert.py; settings come from config.json)
+// ============================================================================
+const H = 3600e3, DAY = 864e5, TZ = "America/Vancouver";
+const PT_FMT = new Intl.DateTimeFormat("en-CA", { timeZone: TZ, year: "numeric", month: "2-digit", day: "2-digit",
+  hour: "2-digit", minute: "2-digit", hourCycle: "h23", weekday: "short" });
+
+function pt(ms) {
+  const o = {};
+  for (const p of PT_FMT.formatToParts(new Date(ms))) o[p.type] = p.value;
+  return { y: +o.year, m: +o.month, d: +o.day, h: +o.hour % 24, min: +o.minute, wd: o.weekday,
+           date: `${o.year}-${o.month}-${o.day}` };
+}
+function ptToUtc(dateStr, hour = 0) {
+  const [y, m, d] = dateStr.split("-").map(Number);
+  const target = Date.UTC(y, m - 1, d, hour);
+  let guess = target;
+  for (let i = 0; i < 3; i++) {
+    const p = pt(guess);
+    guess += target - Date.UTC(p.y, p.m - 1, p.d, p.h, p.min);
+  }
+  return guess;
+}
+function addDays(dateStr, n) {
+  const [y, m, d] = dateStr.split("-").map(Number);
+  return new Date(Date.UTC(y, m - 1, d + n)).toISOString().slice(0, 10);
+}
+function daysBetween(a, b) { return Math.round((Date.parse(b + "T00:00:00Z") - Date.parse(a + "T00:00:00Z")) / DAY); }
+function monthOf(dateStr) { return +dateStr.slice(5, 7); }
+function pyWeekday(dateStr) { return (new Date(dateStr + "T12:00:00Z").getUTCDay() + 6) % 7; } // Mon=0
+function mdOf(dateStr) { return [+dateStr.slice(5, 7), +dateStr.slice(8, 10)]; }
+function cmpMD(a, b) { return a[0] - b[0] || a[1] - b[1]; }
+function inRange(dateStr, start, end) {
+  const x = mdOf(dateStr);
+  return cmpMD(start, end) <= 0 ? (cmpMD(start, x) <= 0 && cmpMD(x, end) <= 0)
+                                : (cmpMD(x, start) >= 0 || cmpMD(x, end) <= 0);
+}
+const avg = a => a.reduce((s, x) => s + x, 0) / a.length;
+const round1 = x => {             // Python-style round(x, 1): exact halves go to the even digit
+  const y = x * 10, r = Math.round(y);
+  return (Math.abs(y % 1) === 0.5 && r % 2 !== 0 ? r - 1 : r) / 10;
+};
+function fq(q) { return q < 20 ? q.toFixed(1) : q.toFixed(0); }
+
+function openSections(kind, d) {
+  if (inRange(d, [7, 15], [8, 31])) return [];
+  const fall = inRange(d, [9, 1], [11, 15]), topClosed = inRange(d, [11, 15], [4, 15]);
+  const out = [];
+  if (kind === "trout" || kind === "steelhead") {
+    if (!topClosed) out.push(["A", fall ? "fly only" : "gear OK"]);
+    out.push(["B", "fly only"]);
+    out.push(["C", fall ? "fly only" : "gear OK"]);
+    if (!fall) out.push(["D", "gear OK"], ["E", "gear OK"]);
+  } else if (kind === "salmon") {
+    let rule = inRange(d, [11, 1], [12, 31]) ? "coho 1/day, others C&R" : "salmon C&R";
+    if (fall) rule += " [provincial table says closed to Nov 15: confirm with DFO Duncan 250-746-6221]";
+    out.push(["D", rule]);
+    if (!fall) out.push(["E", inRange(d, [11, 16], [12, 31]) ? "coho 1/day, others C&R" : "salmon C&R"]);
+  }
+  return out;
+}
+
+function hourly(series) {          // keep the last reading in each hour
+  const m = new Map();
+  for (const p of series) m.set(Math.floor(p.t / H), p);
+  return [...m.keys()].sort((a, b) => a - b).map(k => m.get(k));
+}
+function valueAt(series, t) {
+  let best = series[0].v;
+  for (const p of series) { if (p.t > t) break; best = p.v; }
+  return best;
+}
+function wsum(wx, t0, t1, key = "precip") {
+  let s = 0; for (const h of wx) if (t0 <= h.t && h.t < t1) s += h[key] || 0; return s;
+}
+function wvals(wx, t0, t1, key) {
+  const out = []; for (const h of wx) if (t0 <= h.t && h.t < t1 && h[key] != null) out.push(h[key]); return out;
+}
+function weirLow72(weir, t) {
+  const vals = weir.filter(p => t - 72 * H <= p.t && p.t < t).map(p => p.v);
+  return vals.length ? Math.min(...vals) : weir[weir.length - 1].v;
+}
+function weirJump(nowQ, lowQ, C) { return lowQ > 0 && nowQ >= C.WEIR_JUMP[0] * lowQ && nowQ - lowQ >= C.WEIR_JUMP[1]; }
+
+function classify(q, q24, peak, mn, hrsPeak, C) {
+  const trend = q24 ? (q - q24) / q24 : 0;
+  const freshet = peak >= 1.5 * mn && peak >= 15;
+  if (trend > 0.15) return ["rising", trend];
+  if (freshet && q < 0.9 * peak && hrsPeak >= 6 && hrsPeak <= C.DROP_DAYS * 24 && trend < 0) return ["dropping after freshet", trend];
+  if (trend < -0.10) return ["dropping", trend];
+  return ["stable", trend];
+}
+
+function analyse(flow, weir, wxu, wxl, now, C) {
+  const last = flow[flow.length - 1], tLast = last.t, qNow = last.v;
+  const q24 = valueAt(flow, tLast - 24 * H);
+  let recent = flow.filter(p => p.t >= tLast - C.DROP_DAYS * DAY); if (!recent.length) recent = flow;
+  let pk = recent[0]; for (const p of recent) if (p.v > pk.v) pk = p;
+  const mn = Math.min(...flow.filter(p => p.t >= tLast - (C.DROP_DAYS + 3) * DAY).map(p => p.v));
+  const [phase, trend] = classify(qNow, q24, pk.v, mn, (tLast - pk.t) / H, C);
+  const last10 = flow.filter(p => p.t >= tLast - 10 * DAY).map(p => p.v);
+  const day = pt(now).date, mo = monthOf(day);
+  let weirQ = null, weir24 = null, pulse = false;
+  if (weir.length) {
+    weirQ = weir[weir.length - 1].v;
+    weir24 = weirLow72(weir, weir[weir.length - 1].t);
+    pulse = mo >= 5 && mo <= 11 && weirJump(weirQ, weir24, C);
+  }
+  const hl = wxl.hourly, hu = wxu.hourly;
+  const p0 = wvals(hl, now - 7 * H, now - 5 * H, "pressure"), p1 = wvals(hl, now + 5 * H, now + 7 * H, "pressure");
+  let temps = wvals(hl, now, now + 24 * H, "temp"); if (!temps.length) temps = [10];
+  const L = pt(now);
+  const planDate = L.h >= 12 ? addDays(L.date, 1) : L.date;      // afternoon: plan for tomorrow
+  const d0 = ptToUtc(planDate, 7);
+  let clouds = wvals(hl, d0, d0 + 10 * H, "cloud"); if (!clouds.length) clouds = [50];
+  const sun = wxl.daily[planDate] || {};
+  return {
+    day, plan_date: planDate, q_now: qNow, t_last: tLast, trend_24: trend, phase,
+    flat_10d: last10.length > 0 && Math.max(...last10) < 1.25 * Math.min(...last10),
+    rain_next24: wsum(hu, now, now + 24 * H), rain_next48: wsum(hu, now, now + 48 * H),
+    tmin_24: Math.min(...temps), tmax_24: Math.max(...temps),
+    pressure_trend: p0.length && p1.length ? p1[0] - p0[0] : 0,
+    cloud_day: avg(clouds), peak_7d: pk.v, t_peak_7d: pk.t, q_24: q24,
+    weir_q: weirQ, weir_24: weir24, weir_pulse: pulse,
+    drought: (mo === 9 || mo === 10) && qNow < C.DROUGHT_FLOW,
+    rain_past72: wsum(hu, now - 72 * H, now), ante14: wsum(hu, now - 14 * DAY, now),
+    sunrise: sun.sunrise || "?", sunset: sun.sunset || "?",
+  };
+}
+
+function seasonKey(d) { const m = monthOf(d), y = +d.slice(0, 4); return m >= 9 ? y : y - 1; }
+function detectFallFreshet(flow, weir, seasonStart, C) {
+  const hits = [];
+  for (const p of flow) {
+    if (p.t >= seasonStart && p.v >= 15) {
+      const win = flow.filter(x => x.t >= p.t - 72 * H && x.t <= p.t).map(x => x.v);
+      if (p.v >= 1.6 * Math.min(...win)) { hits.push(p.t); break; }
+    }
+  }
+  for (const p of weir) {
+    if (p.t >= seasonStart) {
+      const earlier = weir.some(x => x.t < p.t);
+      if (weirJump(p.v, earlier ? weirLow72(weir, p.t) : p.v, C)) { hits.push(p.t); break; }
+    }
+  }
+  return hits.length ? Math.min(...hits) : null;
+}
+function eggActivation(freshet, d, C) {
+  let byFlow = 0.3;
+  if (freshet != null) {
+    const days = daysBetween(pt(freshet).date, d);
+    byFlow = days < 3 ? 0.4 : days < 7 ? 0.7 : 1.0;
+  }
+  const yr = monthOf(d) >= 9 ? +d.slice(0, 4) : +d.slice(0, 4) - 1;
+  const pad = n => String(n).padStart(2, "0");
+  const start = `${yr}-${pad(C.EGG_RAMP[0][0])}-${pad(C.EGG_RAMP[0][1])}`;
+  const full = `${yr}-${pad(C.EGG_RAMP[1][0])}-${pad(C.EGG_RAMP[1][1])}`;
+  let floor;
+  if (d < start) floor = 0; else if (d >= full) floor = 1;
+  else floor = 0.4 + 0.6 * daysBetween(start, d) / daysBetween(start, full);
+  return Math.max(byFlow, floor);
+}
+function windowEta(q, hi, base, C) {
+  base = base != null && base < hi ? base : 0;
+  const r = C.PROJ.recession;
+  if (q <= hi || hi <= base) return `should come into range (${hi} m³/s) once the lake outflow drops`;
+  const days = Math.max(1, Math.ceil(Math.log((hi - base) / (q - base)) / Math.log(r)));
+  return `window likely in ~${days} day${days !== 1 ? "s" : ""} as flow drops under ${hi} m³/s`;
+}
+function tier(s, C) { return s >= C.GOOD ? "GOOD" : s >= C.FAIR ? "FAIR" : "POOR"; }
+
+function scoreSpecies(sp, c, eggFactor, C) {
+  const d = c.day, mo = monthOf(d);
+  const sw = sp.season[String(mo)] || 0;
+  if (sw === 0) return { sp, score: 0, why: ["out of season"], heads: [], opens: [] };
+  const opens = openSections(sp.kind, d);
+  if (!opens.length) return { sp, score: 0, why: ["closed by regulation"], heads: [], opens: [] };
+  let w = sw; if (sp.style === "egg") w *= eggFactor;
+  const [lo, hi] = sp.good_flow, [flo, fhi] = sp.fishable_flow, q = c.q_now, ph = c.phase;
+  const why = [], heads = [];
+  let s;
+  if (lo <= q && q <= hi) { s = 5; why.push(`flow in sweet spot (${lo}-${hi})`); }
+  else if (flo <= q && q <= fhi) { s = 2.5; why.push(`flow fishable but ${q < lo ? "low" : "high"}`); }
+  else { s = 0; why.push(q < flo ? "too low" : "blown out"); }
+  if (sp.style === "freshet") {
+    if (ph === "dropping after freshet") { s += 3.5; why.push("dropping and clearing after a freshet"); }
+    else if ((ph === "rising" || c.weir_pulse) && q <= hi) { s += 1.5; why.push("fresh fish moving" + (c.weir_pulse ? " on a weir release" : "")); }
+    else if (ph === "dropping") { s += 1.5; }
+    else if (ph === "stable") { s += 0.5; if (c.flat_10d && q < lo) { s -= 1; why.push("low and flat 10+ days, fish stale"); } }
+    if (c.rain_next24 >= 5 && c.rain_next24 < 25) { s += 0.5; why.push("light rain on the way"); }
+  } else if (sp.style === "egg") {
+    if (ph === "dropping" || ph === "dropping after freshet") { s += 2.5; why.push("settling flows, eggs drifting"); }
+    else if (ph === "stable") { s += 2; why.push("steady flow"); }
+    else if (ph === "rising") { s -= 0.5; why.push("rising, colour coming in"); }
+  } else {
+    if (ph === "stable") { s += 2.5; why.push("stable flow"); }
+    else if (ph === "dropping" || ph === "dropping after freshet") { s += 1.5; why.push("flow settling"); }
+    else if (ph === "rising") { s -= 1.5; why.push("flow rising, likely coloured"); }
+    if (c.cloud_day >= 70) { s += 0.5; why.push("overcast"); }
+  }
+  if (sp.key === "coho" && q >= 28 && q <= 45 && (ph === "rising" || ph === "dropping after freshet" || c.weir_pulse)) { s += 0.5; why.push("prime push flows"); }
+  if (sp.key === "spring" && inRange(d, [3, 20], [5, 31])) { s += 0.5; why.push("salmon fry out, browns on streamers"); }
+  if (sp.key === "steelhead" && hi < q && q <= fhi) why.push("high: fish the soft edges close to shore");
+  if (c.pressure_trend <= -3) { s += 0.5; why.push("falling barometer"); }
+  if (c.rain_next24 >= 40) { s -= 1.5; why.push("heavy rain next 24h"); }
+  if (sp.cold_limit != null && c.tmin_24 < sp.cold_limit) { s -= 2; why.push("cold snap"); }
+  if (sp.heat_limit != null && c.tmax_24 > sp.heat_limit) { s -= 2; why.push("hot, warm-water stress"); }
+  s = Math.max(0, Math.min(10, s)) * w;
+  if (!(flo <= q && q <= fhi)) s = Math.min(s, 2);
+  if (c.drought && (mo === 9 || mo === 10)) { s = Math.min(s, 4); why.push("drought hold"); }
+  if (sp.style === "egg" && eggFactor < 1) why.push(eggFactor >= 0.4 ? "egg bite still building" : "no fall freshet yet");
+  if (sw < 1) why.push(`shoulder season x${sw}`);
+  if (sp.style === "freshet" && sw >= 0.6) {
+    if (q > hi && c.rain_next48 < 10 && q <= fhi * 1.5) heads.push([`${sp.key}:window`, `${sp.name}: ${windowEta(q, hi, c.weir_q, C)}`]);
+    else if (q < lo && c.rain_next48 >= 15) heads.push([`${sp.key}:freshen`,
+      `${sp.name}: ${c.rain_next48.toFixed(0)} mm coming should freshen the river, watch for fish pushing in 24-48h`]);
+  }
+  if (s >= C.GOOD && c.rain_next24 >= 40) heads.push([`${sp.key}:blowout`, `${sp.name}: good now but heavy rain likely blows it out by tomorrow`]);
+  return { sp, score: round1(s), why, heads, opens };
+}
+
+function generalHeads(c) {
+  const mo = monthOf(c.day), out = [];
+  if (c.weir_pulse && mo >= 9 && mo <= 11)
+    out.push(["weir:pulse", `Flow out of the lake up ${fq(c.weir_24)} → ${fq(c.weir_q)} m³/s: salmon will move, trout egg bite follows once chinook are on the redds`]);
+  return out;
+}
+
+function outlookDays(today) {
+  const wd = pyWeekday(today);
+  let start = addDays(today, (4 - wd + 7) % 7);
+  if (wd === 5 || wd === 6) start = today;
+  const out = [];
+  for (let i = 0; i < 3; i++) { const d = addDays(start, i); if (pyWeekday(d) >= 4 || d === start) out.push(d); }
+  return out;
+}
+function dailyMeans(flow) {
+  const by = {};
+  for (const p of flow) (by[pt(p.t).date] ||= []).push(p.v);
+  const out = {}; for (const [d, v] of Object.entries(by)) out[d] = avg(v); return out;
+}
+function buildOutlook(c, flow, wxu, wxl, freshet, C) {
+  const today = c.day, days = outlookDays(today);
+  const rain = {}; for (const [d, v] of Object.entries(wxu.daily)) rain[d] = v.precip;
+  const series = {};
+  for (const [d, v] of Object.entries(dailyMeans(flow))) if (d < today) series[d] = v;
+  series[today] = c.q_now;
+  const m = monthOf(today);
+  const k = (m === 9 || m === 10) ? (c.ante14 >= C.PROJ.wet_fall_mm14 ? C.PROJ.k_wet_fall : C.PROJ.k_dry_fall)
+          : [11, 12, 1, 2, 3].includes(m) ? C.PROJ.k_winter : C.PROJ.k_other;
+  const base = c.weir_q ? c.weir_q : Math.min(c.q_now, 10);
+  let d = today, q = c.q_now;
+  while (d < days[days.length - 1]) {
+    d = addDays(d, 1);
+    q = base + (q - base) * C.PROJ.recession + k * (0.5 * (rain[d] || 0) + 0.5 * (rain[addDays(d, -1)] || 0));
+    series[d] = q;
+  }
+  const hl = wxl.hourly, rows = [];
+  let best = null;
+  for (const dd of days) {
+    if (!wxl.daily[dd]) continue;
+    const prev = [];
+    for (let i = 1; i < C.DROP_DAYS + 4; i++) { const v = series[addDays(dd, -i)]; if (v != null) prev.push(v); }
+    const qq = series[dd], window = [qq, ...prev.slice(0, C.DROP_DAYS)];
+    const peak = Math.max(...window);
+    const [phase, trend] = classify(qq, prev.length ? prev[0] : qq, peak, Math.min(qq, ...prev), 24 * window.indexOf(peak), C);
+    const noon = ptToUtc(dd, 12);
+    const prs = wvals(hl, noon - 24 * H, noon - 23 * H, "pressure"), prn = wvals(hl, noon, noon + H, "pressure");
+    let clouds = wvals(hl, noon - 5 * H, noon + 5 * H, "cloud"); if (!clouds.length) clouds = [50];
+    const dl = wxl.daily[dd];
+    const cd = { day: dd, q_now: qq, trend_24: trend, phase, flat_10d: Math.max(...window) < 1.25 * Math.min(...window),
+      rain_next24: rain[dd] || 0, rain_next48: (rain[dd] || 0) + (rain[addDays(dd, 1)] || 0),
+      tmin_24: dl.tmin, tmax_24: dl.tmax, pressure_trend: prs.length && prn.length ? (prn[0] - prs[0]) / 2 : 0,
+      cloud_day: avg(clouds), weir_q: base, weir_pulse: false,
+      drought: (monthOf(dd) === 9 || monthOf(dd) === 10) && qq < C.DROUGHT_FLOW, sunrise: dl.sunrise, sunset: dl.sunset };
+    const scores = C.SPECIES.map(sp => scoreSpecies(sp, cd, eggActivation(freshet, dd, C), C));
+    const live = scores.filter(s => s.score > 0).sort((a, b) => b.score - a.score);
+    rows.push({ d: dd, q: qq, phase, rain: rain[dd] || 0, tmin: dl.tmin, tmax: dl.tmax, live, cd });
+    if (live.length && (!best || live[0].score > best.sc.score)) best = { d: dd, sc: live[0], cd };
+  }
+  return { rows, best: best && best.sc.score >= C.FAIR ? best : null };
+}
+// CORE-END ===================================================================
+
+// ============================================================================
+// DATA
+// ============================================================================
+const API = "https://api.weather.gc.ca/collections/hydrometric-realtime/items";
+const BBOX = [-124.45, 48.58, -123.48, 48.97];
+const KNOWN = {   // fallback positions (approximate) if the station list can't load
+  "08HA011": { name: "Cowichan River near Duncan", lat: 48.7739, lon: -123.7095 },
+  "08HA002": { name: "Cowichan River at Lake Cowichan", lat: 48.8248, lon: -124.0532 },
+};
+
+async function getJSON(url, ms = 20000) {
+  const ctl = new AbortController(); const t = setTimeout(() => ctl.abort(), ms);
+  try {
+    const r = await fetch(url, { signal: ctl.signal, cache: "no-store" });
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    return await r.json();
+  } finally { clearTimeout(t); }
+}
+const isoZ = ms => new Date(ms).toISOString().slice(0, 19) + "Z";
+
+async function liveSeries(station, days) {
+  const base = `${API}?f=json&STATION_NUMBER=${station}&datetime=${isoZ(Date.now() - days * DAY)}/..&sortby=DATETIME&limit=10000`;
+  let j;
+  try { j = await getJSON(base + "&skipGeometry=true&properties=DATETIME,DISCHARGE,LEVEL"); }
+  catch (e) { j = await getJSON(base); }       // older servers: retry without the extras
+  const pts = (j.features || []).map(f => f.properties)
+    .filter(p => p.DATETIME && p.DISCHARGE != null)
+    .map(p => ({ t: Date.parse(p.DATETIME), v: +p.DISCHARGE, h: p.LEVEL != null ? +p.LEVEL : null }))
+    .sort((a, b) => a.t - b.t);
+  if (!pts.length) throw new Error(`no readings for ${station}`);
+  return hourly(pts);
+}
+async function liveStations() {
+  const url = `${API}?f=json&bbox=${BBOX.join(",")}&datetime=${isoZ(Date.now() - 27 * H)}/..&limit=10000`;
+  const j = await getJSON(url, 25000);
+  const by = new Map();
+  for (const f of j.features || []) {
+    const p = f.properties || {}; if (!p.STATION_NUMBER || !p.DATETIME) continue;
+    const g = f.geometry && f.geometry.coordinates;
+    let s = by.get(p.STATION_NUMBER);
+    if (!s) { s = { id: p.STATION_NUMBER, name: p.STATION_NAME || KNOWN[p.STATION_NUMBER]?.name || p.STATION_NUMBER,
+                    lon: g ? g[0] : null, lat: g ? g[1] : null, pts: [] }; by.set(p.STATION_NUMBER, s); }
+    s.pts.push({ t: Date.parse(p.DATETIME), v: p.DISCHARGE != null ? +p.DISCHARGE : null, h: p.LEVEL != null ? +p.LEVEL : null });
+  }
+  return [...by.values()].map(s => {
+    s.pts.sort((a, b) => a.t - b.t); s.pts = hourly(s.pts);
+    s.last = s.pts[s.pts.length - 1];
+    const ago = s.pts.filter(p => p.t <= s.last.t - 23.5 * H);
+    s.ago = ago.length ? ago[ago.length - 1] : s.pts[0];
+    return s;
+  }).filter(s => s.lat != null);
+}
+async function liveWeather([lat, lon]) {
+  const q = new URLSearchParams({ latitude: lat, longitude: lon,
+    hourly: "precipitation,temperature_2m,pressure_msl,cloud_cover",
+    daily: "precipitation_sum,temperature_2m_max,temperature_2m_min,sunrise,sunset",
+    past_days: 14, forecast_days: 7, timezone: TZ, timeformat: "unixtime" });
+  const d = await getJSON(`https://api.open-meteo.com/v1/forecast?${q}`);
+  const h = d.hourly, dl = d.daily;
+  const hm = ms => { const p = pt(ms); return `${String(p.h).padStart(2, "0")}:${String(p.min).padStart(2, "0")}`; };
+  const daily = {};
+  dl.time.forEach((t, i) => {
+    daily[pt(t * 1000 + 6 * H).date] = { precip: dl.precipitation_sum[i] || 0, tmax: dl.temperature_2m_max[i],
+      tmin: dl.temperature_2m_min[i], sunrise: hm(dl.sunrise[i] * 1000), sunset: hm(dl.sunset[i] * 1000) };
+  });
+  return { hourly: h.time.map((t, i) => ({ t: t * 1000, precip: h.precipitation[i] || 0, temp: h.temperature_2m[i],
+    pressure: h.pressure_msl[i], cloud: h.cloud_cover[i] })), daily };
+}
+function snapWeather(w) {
+  const daily = {};
+  for (const [d, v] of Object.entries(w.daily)) daily[d] = { ...v, sunrise: (v.sunrise || "").slice(11, 16), sunset: (v.sunset || "").slice(11, 16) };
+  return { hourly: w.hourly.map(([t, p, tp, pr, cl]) => ({ t: Date.parse(t), precip: p || 0, temp: tp, pressure: pr, cloud: cl })), daily };
+}
+const snapSeries = rows => (rows || []).map(([t, v]) => ({ t: Date.parse(t), v }));
+
+// ============================================================================
+// UI helpers
+// ============================================================================
+const $ = id => document.getElementById(id);
+const esc = s => String(s).replace(/[&<>"']/g, ch => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[ch]));
+const timeFmt = new Intl.DateTimeFormat("en-CA", { timeZone: TZ, hour: "numeric", minute: "2-digit" });
+const dayFmt = new Intl.DateTimeFormat("en-CA", { timeZone: TZ, weekday: "short", month: "short", day: "numeric" });
+const whenFmt = new Intl.DateTimeFormat("en-CA", { timeZone: TZ, weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+const clock = ms => timeFmt.format(new Date(ms)).replace(/\s?a\.m\./, " am").replace(/\s?p\.m\./, " pm");
+const dateLabel = d => dayFmt.format(new Date(ptToUtc(d, 12))).replace(/\./g, "");
+const when = ms => `${dateLabel(pt(ms).date)} at ${clock(ms)}`;
+const pretty = why => why.map(w => w.replace(/shoulder season x[\d.]+/, "shoulder season")).join(", ");
+const titleCase = s => s.toLowerCase().replace(/\b([a-z])/g, m => m.toUpperCase()).replace(/\b(At|Near|Of|The|Above|Below)\b/g, w => w.toLowerCase());
+function names(list) { const n = list.map(s => s.sp.name); return n.length <= 2 ? n.join(" and ") : n.slice(0, -1).join(", ") + " and " + n[n.length - 1]; }
+function ago(ms) { const m = Math.round((Date.now() - ms) / 60000); return m < 1 ? "just now" : m < 60 ? `${m} min ago` : `${Math.round(m / 60)} h ago`; }
+function trendWord(t) { return t > 0.05 ? "rising" : t < -0.05 ? "falling" : "steady"; }
+function arrow(t) { return t > 0.05 ? "↑" : t < -0.05 ? "↓" : "→"; }
+
+// ============================================================================
+// RENDERERS
+// ============================================================================
+function renderHero(c, scores, heads, C) {
+  const live = scores.filter(s => s.score > 0).sort((a, b) => b.score - a.score);
+  const good = live.filter(s => s.score >= C.GOOD);
+  let title, sub;
+  if (good.length) {
+    title = `${names(good)} ${good.length > 1 ? "are" : "is"} fishing well.`;
+    const b = good[0], card = C.CARDS[b.sp.key], sh = C.SHORT_CARDS[b.sp.key], by = Object.fromEntries(b.opens);
+    const pick = card.prefer.find(k => by[k]);
+    sub = pick ? `Best water: ${C.SECTION_SHORT[pick]} (${by[pick].split(" [")[0]}). ${sh.play}, ${sh.when}.` : sh.play + ".";
+  } else if (live.length && live[0].score >= C.FAIR) {
+    title = `Fair for ${live[0].sp.name.toLowerCase()}, not a must-go.`;
+    sub = `${pretty(live[0].why.slice(0, 3))}.`.replace(/^./, m => m.toUpperCase());
+  } else {
+    title = "Nothing worth the drive right now.";
+    sub = `The river is ${fq(c.q_now)} m³/s and ${c.phase}.`;
+    if (c.drought) sub += " It's in a drought hold: too low to fish fairly.";
+    else if (live.length) sub += ` Best is ${live[0].sp.name.toLowerCase()} at ${live[0].score.toFixed(1)}.`;
+  }
+  if (heads.length) sub += ` ${heads[0][1].replace(/^[^:]+: /, m => m)}`;
+  $("verdict").textContent = title;
+  $("verdict-sub").textContent = sub;
+}
+
+const narrow = () => document.documentElement.clientWidth < 640;
+function renderGauge(c, scores, C) {
+  const W = narrow() ? 560 : 1000, padL = 4, padR = 4, lo = 3, hi = 300, rowH = 46, top = 64;
+  const X = q => padL + (Math.log(Math.max(lo, Math.min(hi, q))) - Math.log(lo)) / (Math.log(hi) - Math.log(lo)) * (W - padL - padR);
+  const mo = monthOf(c.day);
+  const rows = C.SPECIES.map(sp => ({ sp, inSeason: (sp.season[String(mo)] || 0) > 0, sc: scores.find(s => s.sp.key === sp.key) }));
+  const Hh = top + rows.length * rowH + 30;
+  const ticks = [3, 5, 10, 20, 50, 100, 200, 300];
+  let g = `<svg viewBox="0 0 ${W} ${Hh}" role="img" aria-label="Flow now ${fq(c.q_now)} cubic metres per second">`;
+  // staff-gauge rule: alternating painted blocks between ticks
+  for (let i = 0; i < ticks.length - 1; i++) {
+    const x0 = X(ticks[i]), x1 = X(ticks[i + 1]), n = 4;
+    for (let j = 0; j < n; j++) {
+      const a = x0 + (x1 - x0) * j / n, b = x0 + (x1 - x0) * (j + 1) / n;
+      g += `<rect x="${a}" y="30" width="${b - a}" height="${j % 2 ? 6 : 12}" fill="var(--ink)" opacity="${j % 2 ? .25 : .85}"/>`;
+    }
+  }
+  for (const t of ticks) {
+    g += `<line x1="${X(t)}" x2="${X(t)}" y1="${top - 10}" y2="${Hh - 24}" stroke="var(--line)" stroke-width="1"/>`;
+    if (narrow() && (t === 3 || t === 300)) continue;
+    g += `<text x="${X(t)}" y="22" font-size="17" fill="var(--muted)" text-anchor="${t === lo ? "start" : t === hi ? "end" : "middle"}" font-family="var(--body)">${t}</text>`;
+  }
+  rows.forEach((r, i) => {
+    const y = top + i * rowH, [a, b] = r.sp.good_flow, [fa, fb] = r.sp.fishable_flow;
+    const op = r.inSeason ? 1 : .35;
+    const t = r.sc ? tier(r.sc.score, C) : "POOR";
+    g += `<g opacity="${op}">`;
+    g += `<text x="${padL}" y="${y + 14}" font-size="19" font-weight="600" fill="var(--ink)" font-family="var(--display)">${esc(r.sp.name)}${r.inSeason ? "" : " (out of season)"}</text>`;
+    g += `<rect x="${X(fa)}" y="${y + 22}" width="${X(fb) - X(fa)}" height="12" rx="6" fill="var(--riffle-soft)"/>`;
+    g += `<rect x="${X(a)}" y="${y + 22}" width="${X(b) - X(a)}" height="12" rx="6" fill="var(--riffle)"/>`;
+    if (r.inSeason && r.sc && r.sc.score > 0)
+      g += `<text x="${W - padR}" y="${y + 14}" font-size="17" font-weight="600" text-anchor="end" font-family="var(--body)" class="t-${t}" fill="currentColor">${r.sc.score.toFixed(1)} ${t.toLowerCase()}</text>`;
+    g += `</g>`;
+  });
+  const xn = X(c.q_now), xa = X(c.q_24);
+  g += `<line x1="${xa}" x2="${xa}" y1="${top - 6}" y2="${Hh - 24}" stroke="var(--coho)" stroke-width="2" stroke-dasharray="4 5" opacity=".55"/>`;
+  g += `<g class="now-line"><line x1="${xn}" x2="${xn}" y1="${top - 14}" y2="${Hh - 20}" stroke="var(--coho)" stroke-width="3.5"/>`;
+  const anchor = xn > W * .8 ? "end" : xn < W * .2 ? "start" : "middle";
+  g += `<text x="${xn}" y="${Hh - 2}" font-size="21" font-weight="700" fill="var(--coho)" text-anchor="${anchor}" font-family="var(--display)">${fq(c.q_now)} m³/s now ${arrow(c.trend_24)}</text></g>`;
+  g += `</svg>`;
+  $("gauge").innerHTML = g + `<p class="gauge-note">Duncan gauge on a log scale. Dark bars are each fishery's sweet spot, pale bars are fishable. The dashed line is where the river was 24 hours ago.</p>`;
+}
+
+function renderFisheries(scores, C) {
+  const live = scores.filter(s => !["out of season", "closed by regulation"].includes(s.why[0])).sort((a, b) => b.score - a.score);
+  const out = scores.filter(s => s.why[0] === "out of season").map(s => s.sp.name);
+  const closed = scores.filter(s => s.why[0] === "closed by regulation").map(s => s.sp.name);
+  $("fish").innerHTML = live.length ? live.map(s => {
+    const t = tier(s.score, C);
+    const where = s.opens.map(([k, r]) => `${C.SECTION_SHORT[k]} (${r.split(" [")[0]})`).join(", ");
+    return `<li><span class="name">${esc(s.sp.name)}</span>
+      <span class="score t-${t}">${s.score.toFixed(1)}<small>${t.toLowerCase()}</small></span>
+      <span class="why">${esc(pretty(s.why))}<span class="where">Open: ${esc(where)}</span></span>
+      <span class="bar" aria-hidden="true"><i class="b-${t}" style="width:${s.score * 10}%"></i></span></li>`;
+  }).join("") : `<li>Nothing is in season and open today.</li>`;
+  const parts = [];
+  if (out.length) parts.push(`Out of season: ${out.join(", ")}.`);
+  if (closed.length) parts.push(`Closed by regulation today: ${closed.join(", ")}.`);
+  $("offseason").textContent = parts.join(" ");
+}
+
+function renderStats(c) {
+  const weirTxt = c.weir_q != null ? `${fq(c.weir_q)} m³/s` : "no data";
+  const weirSub = c.weir_q == null ? "" : c.weir_pulse ? `up from ${fq(c.weir_24)} in 72 h` : `lowest in 72 h: ${fq(c.weir_24)}`;
+  const planLabel = c.plan_date === c.day ? "today" : "tomorrow";
+  const items = [
+    ["Flow at Duncan", `${fq(c.q_now)} m³/s ${arrow(c.trend_24)}`, `${trendWord(c.trend_24)}, ${(c.trend_24 * 100).toFixed(0)}% in 24 h, reading ${clock(c.t_last)}`],
+    ["River phase", c.phase.replace(/^./, m => m.toUpperCase()), c.peak_7d > 1.3 * c.q_now ? `peak ${fq(c.peak_7d)} on ${dateLabel(pt(c.t_peak_7d).date)}` : ""],
+    ["Out of the lake", weirTxt, weirSub],
+    ["Rain at the lake", `${c.rain_next24.toFixed(0)} mm next 24 h`, `${c.rain_next48.toFixed(0)} mm next 48 h, ${c.rain_past72.toFixed(0)} mm last 3 days`],
+    ["Air at Duncan", `${c.tmin_24.toFixed(0)} to ${c.tmax_24.toFixed(0)} °C`, "next 24 hours"],
+    ["Barometer", `${c.pressure_trend >= 0 ? "+" : ""}${c.pressure_trend.toFixed(0)} hPa`, "change over 12 hours"],
+    [`Cloud ${planLabel}`, `${c.cloud_day.toFixed(0)}%`, "daylight average"],
+    [`Sun ${planLabel}`, `${c.sunrise} to ${c.sunset}`, "sunrise and sunset"],
+  ];
+  if (c.drought) items.push(["Drought hold", "On", "too low to fish fairly; no GOOD scores"]);
+  $("stats").innerHTML = items.map(([a, b, s]) => `<div><dt>${esc(a)}</dt><dd>${esc(b)}${s ? `<small>${esc(s)}</small>` : ""}</dd></div>`).join("");
+}
+
+function renderHeads(heads) {
+  $("heads").innerHTML = heads.map(h => `<li>${esc(h[1])}</li>`).join("");
+}
+
+function spark(pts, w = 120, h = 30) {
+  const v = pts.filter(p => p.v != null);
+  if (v.length < 2) return "";
+  const t0 = v[0].t, t1 = v[v.length - 1].t, mn = Math.min(...v.map(p => p.v)), mx = Math.max(...v.map(p => p.v));
+  const X = t => (t - t0) / ((t1 - t0) || 1) * w, Y = q => h - 3 - (q - mn) / ((mx - mn) || 1) * (h - 6);
+  return `<svg width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" aria-hidden="true"><polyline fill="none" stroke="currentColor" stroke-width="2" points="${v.map(p => `${X(p.t).toFixed(1)},${Y(p.v).toFixed(1)}`).join(" ")}"/></svg>`;
+}
+
+let MAP = null, LAYER = null;
+function renderMap(stations, C) {
+  const keyIds = [C.stations.lower, C.stations.weir];
+  stations.sort((a, b) => (keyIds.includes(b.id) - keyIds.includes(a.id)) || a.name.localeCompare(b.name));
+  const rowsHtml = stations.map(s => {
+    const q = s.last.v, h = s.last.h, dq = q != null && s.ago.v ? (q - s.ago.v) / s.ago.v : null;
+    const dh = h != null && s.ago.h != null ? h - s.ago.h : null;
+    const chg = dq != null ? `<span class="${dq > 0.05 ? "up" : dq < -0.05 ? "down" : ""}">${arrow(dq)} ${(dq * 100).toFixed(0)}%</span>`
+              : dh != null ? `<span>${dh >= 0 ? "+" : ""}${(dh * 100).toFixed(0)} cm</span>` : "";
+    return `<tr class="${keyIds.includes(s.id) ? "key" : ""}"><td class="nm"><button class="go" data-id="${s.id}" type="button">${esc(titleCase(s.name))}</button><small>${s.id}${s.approx ? ", approximate position" : ""}</small></td>
+      <td>${q != null ? fq(q) + " m³/s" : "level only"}${h != null ? `<br><small>${h.toFixed(2)} m</small>` : ""}</td><td>${chg}</td><td><small>${clock(s.last.t)}</small></td></tr>`;
+  }).join("");
+  $("st-table").innerHTML = `<thead><tr><th>Station</th><th>Flow, level</th><th>24 h</th><th>Read</th></tr></thead><tbody>${rowsHtml}</tbody>`;
+
+  if (!window.L) { $("map").innerHTML = `<p class="map-fallback">The map library didn't load. Station readings are listed alongside.</p>`; return; }
+  if (!MAP) {
+    MAP = L.map("map", { scrollWheelZoom: false, attributionControl: true });
+    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 17,
+      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors' }).addTo(MAP);
+  }
+  if (LAYER) LAYER.remove();
+  LAYER = L.layerGroup().addTo(MAP);
+  const markers = {};
+  for (const s of stations) {
+    const q = s.last.v, key = keyIds.includes(s.id);
+    const tc = titleCase(s.name);
+    const short = /^Cowichan River /.test(tc) ? tc.replace(/^Cowichan River (at|near) /, "")
+                : tc.replace(/\s+(at|near|above|below)\s.*$/, "");
+    const label = `${esc(short)} ${q != null ? fq(q) : (s.last.h != null ? s.last.h.toFixed(2) + " m" : "")}`;
+    // Main-stem gauges get a labelled pin; side streams a dot with a hover label, so pins don't pile up.
+    const css = getComputedStyle(document.documentElement), teal = css.getPropertyValue("--riffle").trim() || "#2f6f68";
+    const m = key
+      ? L.marker([s.lat, s.lon], { icon: L.divIcon({ className: "pin-wrap", html: `<span class="pin key">${label}</span>`, iconSize: [0, 0] }),
+                                  keyboard: true, title: titleCase(s.name), zIndexOffset: 1000 }).addTo(LAYER)
+      : L.circleMarker([s.lat, s.lon], { radius: 7, color: "#fff", weight: 2, fillColor: teal, fillOpacity: 1 })
+          .bindTooltip(label, { direction: "top", offset: [0, -6] }).addTo(LAYER);
+    const dq = q != null && s.ago.v ? (q - s.ago.v) / s.ago.v : null;
+    m.bindPopup(`<b>${esc(titleCase(s.name))}</b><br>${s.id}${s.approx ? " (approximate position)" : ""}<br>
+      ${q != null ? `Flow ${fq(q)} m³/s` : ""}${s.last.h != null ? `${q != null ? ", " : ""}level ${s.last.h.toFixed(2)} m` : ""}<br>
+      ${dq != null ? `${trendWord(dq)}, ${(dq * 100).toFixed(0)}% in 24 h<br>` : ""}Last reading ${clock(s.last.t)} (${ago(s.last.t)})<br>
+      <span style="color:var(--riffle)">${spark(s.pts.map(p => ({ t: p.t, v: p.v != null ? p.v : p.h })))}</span><br>
+      <a href="https://wateroffice.ec.gc.ca/report/real_time_e.html?stn=${s.id}" target="_blank" rel="noopener">Open on Water Office</a>`);
+    markers[s.id] = m;
+  }
+  const pts = stations.map(s => [s.lat, s.lon]);
+  if (pts.length > 1) MAP.fitBounds(pts, { padding: [36, 36], maxZoom: 12 }); else if (pts.length) MAP.setView(pts[0], 11);
+  document.querySelectorAll("#st-table button.go").forEach(b => b.onclick = () => {
+    const m = markers[b.dataset.id]; if (m) { MAP.setView(m.getLatLng(), Math.max(MAP.getZoom(), 12)); m.openPopup(); $("map").scrollIntoView({ block: "nearest" }); }
+  });
+  setTimeout(() => MAP.invalidateSize(), 50);
+}
+
+function renderHydro(flow, weir, scores, C, nowMs) {
+  const W = narrow() ? 600 : 1000, Hh = narrow() ? 400 : 380, pl = 48, pr = 10, ptp = 16, pb = 44, fs = narrow() ? 19 : 15;
+  const all = [...flow, ...weir].filter(p => p.v > 0);
+  const t0 = Math.min(...all.map(p => p.t)), t1 = Math.max(nowMs, ...all.map(p => p.t));
+  const qmin = Math.max(1, Math.min(...all.map(p => p.v)) * 0.8), qmax = Math.max(...all.map(p => p.v)) * 1.15;
+  const lmin = Math.log(qmin), lmax = Math.log(Math.max(qmax, qmin * 3));
+  const X = t => pl + (t - t0) / (t1 - t0) * (W - pl - pr);
+  const Y = q => ptp + (1 - (Math.log(Math.max(q, qmin)) - lmin) / (lmax - lmin)) * (Hh - ptp - pb);
+  const primary = scores.filter(s => s.score > 0).sort((a, b) => b.score - a.score)[0]
+               || scores.find(s => s.why[0] !== "out of season");
+  let g = `<svg viewBox="0 0 ${W} ${Hh}" role="img" aria-label="Flow at Duncan and out of Cowichan Lake over the last 30 days">`;
+  if (primary) {
+    const [a, b] = primary.sp.good_flow;
+    const ya = Y(Math.min(b, Math.exp(lmax))), yb = Y(Math.max(a, qmin));
+    if (yb > ya) g += `<rect x="${pl}" y="${ya}" width="${W - pl - pr}" height="${yb - ya}" fill="var(--riffle-softer)"/>`;
+  }
+  for (const t of [1, 2, 3, 5, 7, 10, 15, 20, 30, 50, 70, 100, 150, 200, 300, 500]) {
+    if (t < qmin || t > Math.exp(lmax)) continue;
+    g += `<line x1="${pl}" x2="${W - pr}" y1="${Y(t)}" y2="${Y(t)}" stroke="var(--line)" stroke-width="1"/>`;
+    g += `<text x="${pl - 8}" y="${Y(t) + 5}" font-size="${fs}" text-anchor="end" fill="var(--muted)" font-family="var(--body)">${t}</text>`;
+  }
+  const firstDay = pt(t0).date;
+  for (let i = 0; i <= 31; i += narrow() ? 7 : 5) {
+    const d = addDays(firstDay, i), x = X(ptToUtc(d, 0));
+    if (x < pl || x > W - pr) continue;
+    g += `<line x1="${x}" x2="${x}" y1="${ptp}" y2="${Hh - pb}" stroke="var(--line)" stroke-width="1" opacity=".6"/>`;
+    g += `<text x="${x}" y="${Hh - pb + 22}" font-size="${fs}" text-anchor="middle" fill="var(--muted)" font-family="var(--body)">${dateLabel(d).replace(/^\w+,?\s*/, "")}</text>`;
+  }
+  const path = s => s.filter(p => p.v > 0).map((p, i) => `${i ? "L" : "M"}${X(p.t).toFixed(1)},${Y(p.v).toFixed(1)}`).join("");
+  if (weir.length) g += `<path d="${path(weir)}" fill="none" stroke="var(--lake)" stroke-width="2" stroke-dasharray="6 4"/>`;
+  g += `<path d="${path(flow)}" fill="none" stroke="var(--riffle)" stroke-width="3" stroke-linejoin="round"/>`;
+  const last = flow[flow.length - 1];
+  g += `<circle cx="${X(last.t)}" cy="${Y(last.v)}" r="6" fill="var(--coho)"/>`;
+  g += `<line id="hover-x" x1="0" x2="0" y1="${ptp}" y2="${Hh - pb}" stroke="var(--ink)" stroke-width="1" opacity="0"/>`;
+  g += `<text x="${pl - 8}" y="${ptp - 2}" font-size="13" text-anchor="end" fill="var(--muted)" font-family="var(--body)">m³/s</text></svg>`;
+  const box = $("hydro"); box.querySelectorAll("svg").forEach(n => n.remove());
+  box.insertAdjacentHTML("afterbegin", g);
+  $("legend").innerHTML = `<li><i style="background:var(--riffle)"></i>Duncan (08HA011)</li>` +
+    (weir.length ? `<li><i style="background:var(--lake)"></i>Out of the lake (08HA002)</li>` : "") +
+    (primary ? `<li><i style="background:var(--riffle-soft);height:10px;vertical-align:1px"></i>${esc(primary.sp.name)} sweet spot</li>` : "") +
+    `<li><i style="background:var(--coho);height:8px;width:8px;border-radius:50%"></i>Latest reading</li>`;
+  const svg = box.querySelector("svg"), tip = $("tip"), hx = svg.querySelector("#hover-x");
+  const near = (s, t) => { let b = null; for (const p of s) if (!b || Math.abs(p.t - t) < Math.abs(b.t - t)) b = p; return b; };
+  const move = ev => {
+    const r = svg.getBoundingClientRect(), sx = (ev.clientX - r.left) / r.width * W;
+    if (sx < pl || sx > W - pr) { tip.style.display = "none"; hx.setAttribute("opacity", 0); return; }
+    const t = t0 + (sx - pl) / (W - pl - pr) * (t1 - t0), a = near(flow, t), b = weir.length ? near(weir, t) : null;
+    hx.setAttribute("x1", X(a.t)); hx.setAttribute("x2", X(a.t)); hx.setAttribute("opacity", .35);
+    tip.innerHTML = `${esc(when(a.t))}<br>Duncan <b>${fq(a.v)}</b> m³/s${b ? `<br>Lake outflow <b>${fq(b.v)}</b> m³/s` : ""}`;
+    tip.style.display = "block";
+    const px = ev.clientX - box.getBoundingClientRect().left;
+    tip.style.left = Math.min(Math.max(px + 12, 0), box.clientWidth - tip.offsetWidth) + "px"; tip.style.top = "8px";
+  };
+  svg.onpointermove = move; svg.onpointerdown = move;
+  svg.onpointerleave = () => { tip.style.display = "none"; hx.setAttribute("opacity", 0); };
+}
+
+function renderForecast(wxu, wxl, outlook, today, C) {
+  const days = []; for (let i = 0; i < 7; i++) days.push(addDays(today, i));
+  const maxR = Math.max(20, ...days.map(d => wxu.daily[d]?.precip || 0));
+  $("days").innerHTML = days.map((d, i) => {
+    const u = wxu.daily[d], l = wxl.daily[d]; if (!u || !l) return "";
+    const wk = pyWeekday(d) >= 4;
+    return `<div class="day${wk ? " weekend" : ""}"><div class="dname">${i === 0 ? "Today" : dayFmt.format(new Date(ptToUtc(d, 12))).split(",")[0]}</div>
+      <div class="rainbar" aria-hidden="true"><i style="height:${Math.max(2, (u.precip / maxR) * 64)}px"></i></div>
+      <div class="mm">${u.precip.toFixed(0)} mm</div><div class="tt">${l.tmin.toFixed(0)} to ${l.tmax.toFixed(0)}°</div></div>`;
+  }).join("");
+  $("outlook").innerHTML = outlook.rows.map(r => {
+    const top = r.live.slice(0, 3).map(s => `${s.sp.name} ${s.score.toFixed(1)} <span class="t-${tier(s.score, C)}">${tier(s.score, C).toLowerCase()}</span>`).join(", ") || "nothing open or in season";
+    const isBest = outlook.best && outlook.best.d === r.d;
+    return `<li class="${isBest ? "best" : ""}"><span class="od">${dateLabel(r.d)}</span>
+      <span>${top}<br><span class="ofl">About ${fq(r.q)} m³/s, ${r.phase}. ${r.rain.toFixed(0)} mm rain, ${r.tmin.toFixed(0)} to ${r.tmax.toFixed(0)}°C.</span></span></li>`;
+  }).join("") || `<li>No forecast for the weekend yet.</li>`;
+}
+
+function renderPlans(scores, c, C) {
+  const live = scores.filter(s => s.opens.length).sort((a, b) => b.score - a.score);
+  $("plans").innerHTML = live.map(s => {
+    const card = C.CARDS[s.sp.key], by = Object.fromEntries(s.opens), t = tier(s.score, C);
+    const picks = card.prefer.filter(k => by[k]).slice(0, 2);
+    const where = picks.map(k => {
+      const [rule, flag] = by[k].split(" [");
+      return `${esc(C.SECTIONS[k])}: ${esc(rule)}${flag ? ` <span class="flag">confirm with DFO</span>` : ""}`;
+    }).join("<br>");
+    const gearOk = picks.some(k => !by[k].includes("fly only"));
+    return `<article class="plan"><h3>${esc(s.sp.name)}<span class="t-${t}">${s.score.toFixed(1)} ${t.toLowerCase()}</span></h3><dl>
+      <dt>Where</dt><dd>${where}</dd><dt>Spots</dt><dd>${esc(card.where)}</dd>
+      ${gearOk ? `<dt>Gear</dt><dd>${esc(card.gear)}</dd>` : ""}<dt>Fly</dt><dd>${esc(card.fly)}</dd>
+      <dt>Play</dt><dd>${esc(card.play)}</dd><dt>When</dt><dd>${esc(card.timing)}. Sunrise ${c.sunrise}, sunset ${c.sunset}.</dd>
+      ${card.extra ? `<dt>Note</dt><dd>${esc(card.extra)}</dd>` : ""}</dl></article>`;
+  }).join("") || `<p>Nothing is in season and open today.</p>`;
+}
+
+function renderRegs(d, snap, C) {
+  const tr = Object.fromEntries(openSections("trout", d)), sa = Object.fromEntries(openSections("salmon", d));
+  const cell = r => r ? esc(r.split(" [")[0]) + (r.includes("[") ? ` <span class="flag">confirm with DFO Duncan 250-746-6221</span>` : "") : `<span class="closed">Closed</span>`;
+  $("regs").innerHTML = `<thead><tr><th>Section, top of the river first</th><th>Trout and steelhead</th><th>Salmon</th></tr></thead><tbody>` +
+    Object.keys(C.SECTIONS).map(k => `<tr><td class="sec"><b>${esc(C.SECTION_SHORT[k])}</b><br><small>${esc(C.SECTIONS[k])}</small></td><td>${cell(tr[k])}</td><td>${cell(sa[k])}</td></tr>`).join("") + `</tbody>`;
+  let rules = `${C.STANDING_RULES} The whole river is closed July 15 to August 31.`;
+  if (d > C.REGS_VALID_UNTIL) rules += " The regulation calendar is from the 2025-2027 synopsis and has expired; check the new one.";
+  $("rules").innerHTML = `${esc(rules)} <a href="${C.links.dfo}" target="_blank" rel="noopener">DFO salmon table</a>, <a href="${C.links.bc}" target="_blank" rel="noopener">BC regulations and in-season changes</a>.`;
+  const dfo = snap?.regs?.["DFO salmon table"];
+  let w = "";
+  if (snap?.regs_checked_at) w += `<p>The alert last checked both regulation pages ${esc(when(Date.parse(snap.regs_checked_at)))}. Any change to a Cowichan line sends a push.</p>`;
+  if (dfo?.rows?.length) w += `<p>The DFO table currently lists for the Cowichan:</p><ul>${dfo.rows.map(r => `<li>${esc(r)}</li>`).join("")}</ul>`;
+  $("watch").innerHTML = w;
+}
+
+function renderAlerts(snap) {
+  const h = (snap?.history || []).slice(-12).reverse();
+  $("alerts").innerHTML = h.length ? h.map(a => `<li><time datetime="${a.t}">${esc(when(Date.parse(a.t)))}</time><span>${esc(a.title)}</span></li>`).join("")
+    : `<li style="display:block">No alerts sent yet. They'll show here after the scheduled runs.</li>`;
+}
+
+// ============================================================================
+// LOAD
+// ============================================================================
+let LOADED_AT = 0, BUSY = false, LAST = null;
+let resizeT = null;
+window.addEventListener("resize", () => {
+  clearTimeout(resizeT);
+  resizeT = setTimeout(() => {
+    if (!LAST || LAST.wide === !narrow()) return;
+    renderGauge(LAST.c, LAST.scores, LAST.C); renderHydro(LAST.flow, LAST.weir, LAST.scores, LAST.C, LAST.evalAt);
+    LAST.wide = !narrow();
+  }, 200);
+});
+async function load() {
+  if (BUSY) return; BUSY = true;
+  const status = $("status");
+  status.className = "status"; status.textContent = "Loading live gauge data";
+  try {
+    const [cfgR, snapR] = await Promise.allSettled([getJSON("config.json?" + Date.now()), getJSON("snapshot.json?" + Date.now())]);
+    if (cfgR.status !== "fulfilled") throw new Error("Settings file config.json is missing. Run the GitHub workflow once to publish it.");
+    const C = cfgR.value, snap = snapR.status === "fulfilled" ? snapR.value : null;
+    C.EGG_RAMP = C.EGG_RAMP || [[10, 25], [11, 5]];
+    const now = Date.now();
+
+    const [fl, wr, stR, wu, wl] = await Promise.allSettled([
+      liveSeries(C.stations.lower, 30), liveSeries(C.stations.weir, 30), liveStations(),
+      liveWeather(C.wx_upper), liveWeather(C.wx_lower)]);
+    let flow, weir, source = "live", note = "";
+    if (fl.status === "fulfilled") { flow = fl.value; weir = wr.status === "fulfilled" ? wr.value : []; }
+    else {
+      if (!snap) throw new Error(`Live gauge data couldn't load (${fl.reason?.message || fl.reason}) and there's no saved run to fall back on yet.`);
+      flow = snapSeries(snap.flow[C.stations.lower]); weir = snapSeries(snap.flow[C.stations.weir]); source = "snapshot";
+      note = fl.reason?.message || String(fl.reason);
+    }
+    const wxu = wu.status === "fulfilled" ? wu.value : snap && snapWeather(snap.wx.upper);
+    const wxl = wl.status === "fulfilled" ? wl.value : snap && snapWeather(snap.wx.lower);
+    if (!wxu || !wxl) throw new Error("Weather couldn't load and there's no saved run to fall back on yet.");
+    const evalAt = source === "live" ? now : Date.parse(snap.generated_at);
+
+    const c = analyse(flow, weir, wxu, wxl, evalAt, C);
+    const sk = seasonKey(c.day);
+    let freshet = detectFallFreshet(flow, weir, ptToUtc(`${sk}-09-01`, 0), C);
+    const saved = snap?.season && snap.season.key === sk && snap.season.fall_freshet ? Date.parse(snap.season.fall_freshet) : null;
+    if (saved != null && (freshet == null || saved < freshet)) freshet = saved;
+    const scores = C.SPECIES.map(sp => scoreSpecies(sp, c, eggActivation(freshet, c.day, C), C));
+    const heads = [...generalHeads(c), ...scores.flatMap(s => s.heads)];
+    const outlook = buildOutlook(c, flow, wxu, wxl, freshet, C);
+
+    renderHero(c, scores, heads, C); renderGauge(c, scores, C); renderFisheries(scores, C);
+    renderStats(c); renderHeads(heads);
+    let stations = stR.status === "fulfilled" ? stR.value : [];
+    if (!stations.length) {
+      const mk = (id, s) => ({ id, name: KNOWN[id].name, lat: KNOWN[id].lat, lon: KNOWN[id].lon, approx: true, pts: s.slice(-27),
+        last: s[s.length - 1], ago: s[Math.max(0, s.length - 25)] });
+      stations = [mk(C.stations.lower, flow)]; if (weir.length) stations.push(mk(C.stations.weir, weir));
+    }
+    renderMap(stations, C);
+    renderHydro(flow, weir, scores, C, evalAt);
+    LAST = { c, scores, flow, weir, C, evalAt, wide: !narrow() };
+    renderForecast(wxu, wxl, outlook, c.day, C);
+    renderPlans(scores, c, C); renderRegs(c.day, snap, C); renderAlerts(snap);
+
+    const age = (now - c.t_last) / H;
+    if (source === "live") {
+      status.className = age > C.STALE_HOURS ? "status stale" : "status live";
+      status.textContent = `Live. Duncan gauge read ${clock(c.t_last)} (${ago(c.t_last)}), page updated ${clock(now)}.` +
+        (age > C.STALE_HOURS ? " The gauge hasn't reported for a while, so treat these numbers with caution." : "");
+    } else {
+      status.className = "status stale";
+      status.textContent = `Live gauge data isn't reachable right now (${note}), so this shows the alert's run from ${when(evalAt)}.`;
+    }
+    $("foot-run").textContent = snap ? `Settings and saved data from the alert run on ${when(Date.parse(snap.generated_at))}.` : "";
+    LOADED_AT = now;
+  } catch (e) {
+    status.className = "status stale"; status.textContent = "Couldn't load the river data.";
+    $("verdict").textContent = "No data yet.";
+    $("verdict-sub").innerHTML = `<span class="err">${esc(e.message || e)}</span>`;
+    console.error(e);
+  } finally { BUSY = false; }
+}
+$("refresh").addEventListener("click", load);
+document.addEventListener("visibilitychange", () => { if (!document.hidden && Date.now() - LOADED_AT > 5 * 60e3) load(); });
+setInterval(() => { if (!document.hidden) load(); }, 10 * 60e3);
+load();
+</script>
+</body>
+</html>
