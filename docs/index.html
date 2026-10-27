@@ -78,6 +78,7 @@ button.refresh:hover { border-color: var(--riffle); }
 
 /* leaflet, dark */
 .leaflet-container { font: 14px/1.4 var(--body); background: #0e1a19; }
+.tiles-dark { filter: invert(1) hue-rotate(180deg) brightness(.8) contrast(.92) saturate(.5); }
 .leaflet-bar a, .leaflet-control-layers { background: var(--raised); color: var(--ink); border-color: var(--line); }
 .leaflet-bar a:hover { background: var(--surface); }
 .leaflet-control-layers-expanded { padding: 8px 10px; color: var(--ink); }
@@ -293,7 +294,7 @@ footer p { max-width: 84ch; margin: 0 0 6px; }
   </main>
 
   <footer>
-    <p>Flows and levels: Water Survey of Canada real-time data (provisional). Weather: Open-Meteo. River line: OpenStreetMap. Regulations: 2025-2027 BC freshwater synopsis and the DFO Region 1 salmon table.</p>
+    <p>Flows and levels: Water Survey of Canada real-time data (provisional). Weather: Open-Meteo. Map and river line: OpenStreetMap contributors. Regulations: 2025-2027 BC freshwater synopsis and the DFO Region 1 salmon table.</p>
     <p>Scores are a guide built from flow, trend, rain, temperature and season. Always read the current notices before you go.</p>
     <p id="foot-run"></p>
   </footer>
@@ -651,13 +652,14 @@ async function liveWeather([lat, lon]) {
   return { hourly: h.time.map((t, i) => ({ t: t * 1000, precip: h.precipitation[i] || 0, temp: h.temperature_2m[i],
     pressure: h.pressure_msl[i], cloud: h.cloud_cover[i] })), daily };
 }
-async function riverLine() {      // Cowichan River centreline from OpenStreetMap, cached for 30 days
+async function riverLine() {      // Cowichan River centreline: river.json in the site, else OpenStreetMap (slow), cached 30 days
+  try { const r = await getJSON("river.json?v=1", 10000); if (r.lines && r.lines.length) return r.lines; } catch (e) { /* not published */ }
   try {
     const c = JSON.parse(localStorage.getItem("cowichan-river-line") || "null");
     if (c && Date.now() - c.at < 30 * DAY && c.lines?.length) return c.lines;
   } catch (e) { /* storage unavailable */ }
   const q = `[out:json][timeout:25];way["waterway"="river"]["name"="Cowichan River"](48.70,-124.12,48.86,-123.55);out geom;`;
-  const j = await getJSON("https://overpass-api.de/api/interpreter?data=" + encodeURIComponent(q), 30000);
+  const j = await getJSON("https://overpass-api.de/api/interpreter?data=" + encodeURIComponent(q), 90000);
   const lines = (j.elements || []).filter(e => e.geometry).map(e => e.geometry.map(g => [g.lat, g.lon]));
   try { localStorage.setItem("cowichan-river-line", JSON.stringify({ at: Date.now(), lines })); } catch (e) { /* ignore */ }
   return lines;
@@ -811,18 +813,22 @@ function renderStrip(stations, C) {
   }).join("");
 }
 
-let MAP = null, LAYER = null, RIVER = null, MARKERS = {};
+let MAP = null, LAYER = null, RIVER = null, MARKERS = {}, FIT = null, USER_MOVED = false;
 function renderMap(stations, C) {
   if (!window.L) { $("map").innerHTML = `<p style="padding:18px;color:var(--muted)">The map library didn't load. Gauge readings are listed below.</p>`; return; }
   if (!MAP) {
     MAP = L.map("map", { scrollWheelZoom: false, zoomControl: true, zoomSnap: 0.25 });
-    const dark = L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png", { subdomains: "abcd", maxZoom: 19,
-      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/attributions">CARTO</a>' });
+    // OpenStreetMap tiles darkened with a CSS filter: no API key needed
+    const dark = L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 19, className: "tiles-dark",
+      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors' });
     const topo = L.tileLayer("https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png", { maxZoom: 17,
       attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>, SRTM, <a href="https://opentopomap.org">OpenTopoMap</a> (CC-BY-SA)' });
     const sat = L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}", { maxZoom: 18,
       attribution: "Imagery &copy; Esri" });
     dark.addTo(MAP);
+    // Keep all the gauges in view as the layout settles, until you pan or zoom yourself
+    for (const ev of ["pointerdown", "wheel", "touchstart", "keydown"]) $("map").addEventListener(ev, () => { USER_MOVED = true; }, { passive: true });
+    if (window.ResizeObserver) new ResizeObserver(() => { MAP.invalidateSize(); if (!USER_MOVED && FIT) FIT(); }).observe($("map"));
     L.control.layers({ "Dark": dark, "Terrain": topo, "Satellite": sat }, null, { position: "topright" }).addTo(MAP);
     riverLine().then(lines => {
       if (!lines.length) return;
@@ -851,12 +857,13 @@ function renderMap(stations, C) {
   }
   const pts = stations.map(s => [s.lat, s.lon]);
   const pad = narrow() ? { paddingTopLeft: [70, 40], paddingBottomRight: [60, 20] } : { paddingTopLeft: [170, 90], paddingBottomRight: [80, 190] };
-  if (pts.length > 1) MAP.fitBounds(pts, { ...pad, maxZoom: 12 }); else if (pts.length) MAP.setView(pts[0], 11);
+  FIT = () => { if (pts.length > 1) MAP.fitBounds(pts, { ...pad, maxZoom: 12, animate: false }); else if (pts.length) MAP.setView(pts[0], 11); };
+  if (!USER_MOVED) FIT();
   document.querySelectorAll("#strip .stn").forEach(b => b.onclick = () => {
     const m = MARKERS[b.dataset.id]; if (!m) return;
     MAP.setView(m.getLatLng(), Math.max(MAP.getZoom(), 12)); m.openPopup(); $("map").scrollIntoView({ block: "nearest", behavior: "smooth" });
   });
-  setTimeout(() => MAP.invalidateSize(), 60);
+  setTimeout(() => { MAP.invalidateSize(); if (!USER_MOVED) FIT(); }, 300);
 }
 function sparkSvg(pts, key, color, w = 220, h = 28) {
   const v = pts.filter(p => p[key] != null); if (v.length < 2) return "";
