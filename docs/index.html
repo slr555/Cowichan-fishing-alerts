@@ -74,6 +74,8 @@ button.refresh:hover { border-color: var(--riffle); }
 .stn-row .q b { color: var(--riffle); } .stn-row .h b { color: var(--level); }
 .stn-row i { font-style: normal; font-size: 13.5px; color: var(--muted); }
 .stn-read { font-size: 12.5px; color: var(--faint); }
+.stn-norm { font-size: 12.5px; color: var(--muted); }
+.stn-norm b { font-weight: 600; } .lo { color: var(--fair); } .hi { color: var(--level); }
 .up { color: var(--coho) !important; } .down { color: var(--riffle) !important; }
 
 /* leaflet, dark */
@@ -136,6 +138,23 @@ h3 { font: 600 18px/1.2 var(--display); margin: 14px 0 6px; }
 .stats dd small { font: 400 12.5px/1.3 var(--body); color: var(--faint); display: block; }
 .heads { margin: 14px 0 0; padding: 0; list-style: none; }
 .heads li { background: var(--warn-bg); color: var(--warn-ink); padding: 8px 12px; border-radius: 6px; margin: 0 0 6px; font-size: 14.5px; font-weight: 500; }
+
+/* river sections on the map */
+.sec-ctl { background: #0a1413e6; border: 1px solid var(--line); border-radius: 10px; padding: 8px 10px; color: var(--ink);
+  font: 13px/1.35 var(--body); max-width: 230px; }
+.sec-ctl .kinds { display: flex; gap: 4px; margin-bottom: 6px; }
+.sec-ctl button { font: 600 12.5px var(--body); color: var(--muted); background: transparent; border: 1px solid var(--line); border-radius: 6px; padding: 3px 7px; cursor: pointer; }
+.sec-ctl button[aria-pressed="true"] { color: var(--bg); background: var(--riffle); border-color: var(--riffle); }
+.sec-ctl ul { list-style: none; margin: 0; padding: 0; }
+.sec-ctl li { display: flex; align-items: center; gap: 7px; margin: 2px 0; }
+.sec-ctl li i { width: 18px; height: 4px; border-radius: 2px; flex: none; }
+.sec-ctl li i.dash { background: repeating-linear-gradient(90deg, currentColor 0 4px, transparent 4px 7px) !important; }
+.sec-ctl .fine { color: var(--faint); font-size: 11.5px; margin-top: 4px; }
+.bound-lbl { background: var(--raised); color: var(--ink); border: 1px solid var(--line); font: 12px var(--body); }
+.edit-box { position: absolute; z-index: 600; right: 14px; top: 60px; width: 300px; background: var(--raised); border: 1px solid var(--line);
+  border-radius: 10px; padding: 10px; font-size: 12.5px; color: var(--ink); }
+.edit-box textarea { width: 100%; height: 120px; background: var(--bg); color: var(--ink); border: 1px solid var(--line); border-radius: 6px; font: 11.5px/1.3 monospace; }
+.norm-note { color: var(--faint); font-size: 13px; margin: -4px 0 10px; }
 
 /* small-multiple charts */
 .charts { display: grid; gap: 10px; }
@@ -257,6 +276,7 @@ footer p { max-width: 84ch; margin: 0 0 6px; }
 
     <section class="block" aria-labelledby="h-hydro">
       <h2 id="h-hydro">Last 30 days</h2>
+      <p class="norm-note" id="norm-note"></p>
       <div class="charts" id="charts"></div>
     </section>
 
@@ -664,6 +684,27 @@ async function riverLine() {      // Cowichan River centreline: river.json in th
   try { localStorage.setItem("cowichan-river-line", JSON.stringify({ at: Date.now(), lines })); } catch (e) { /* ignore */ }
   return lines;
 }
+function mmdd(ms) { return pt(ms).date.slice(5); }
+function normalFor(N, id, key, ms) {          // [p10, p25, p50, p75, p90] for that calendar day, or null
+  const st = N && N.stations && N.stations[id]; if (!st) return null;
+  return st[key === "v" ? "flow" : "level"][mmdd(ms)] || null;
+}
+function levelComparable(N, id, pts) {        // does today's level datum match the history? (stage at today's flow)
+  const st = N && N.stations && N.stations[id]; if (!st) return false;
+  const a = lastWith(pts, "h"); if (!a) return false;
+  if (st.level_range) return a.h >= st.level_range[0] - 0.3 && a.h <= st.level_range[1] + 0.3;   // lake: no flow, check the range
+  if (!st.rating || !st.rating.length) return false;
+  const b = lastWith(pts, "v"); if (!b) return false;
+  const r = st.rating; let lo = r[0], hi = r[r.length - 1];
+  for (let i = 0; i < r.length - 1; i++) if (r[i][0] <= b.v && b.v <= r[i + 1][0]) { lo = r[i]; hi = r[i + 1]; break; }
+  const f = hi[0] === lo[0] ? 0 : (Math.log(b.v) - Math.log(lo[0])) / (Math.log(hi[0]) - Math.log(lo[0]));
+  const expect = lo[1] + (hi[1] - lo[1]) * Math.min(1, Math.max(0, f));
+  return Math.abs(a.h - expect) <= 0.15;
+}
+function normWord(x, n) {                     // where today sits in the normal range
+  if (x < n[0]) return ["lo", "well below normal"]; if (x < n[1]) return ["lo", "below normal"];
+  if (x > n[4]) return ["hi", "well above normal"]; if (x > n[3]) return ["hi", "above normal"]; return ["", "normal"];
+}
 function snapWeather(w) {
   const daily = {};
   for (const [d, v] of Object.entries(w.daily)) daily[d] = { ...v, sunrise: (v.sunrise || "").slice(11, 16), sunset: (v.sunset || "").slice(11, 16) };
@@ -800,6 +841,17 @@ function renderStats(c) {
 }
 function renderHeads(heads) { $("heads").innerHTML = heads.map(h => `<li>${esc(h[1])}</li>`).join(""); }
 
+let NORMALS = null;
+function normLine(s, q, h) {
+  const nq = q ? normalFor(NORMALS, s.id, "v", q.t) : null;
+  if (nq) { const [cls, w] = normWord(q.v, nq);
+    return `<span class="stn-norm"><b class="${cls}">${Math.round(q.v / nq[2] * 100)}% of normal</b> for the date, ${w} (median ${fq(nq[2])})</span>`; }
+  const nh = h ? normalFor(NORMALS, s.id, "h", h.t) : null;
+  if (nh && levelComparable(NORMALS, s.id, s.series || s.pts)) { const d = (h.h - nh[2]) * 100;
+    const [cls, w] = normWord(h.h, nh);
+    return `<span class="stn-norm"><b class="${cls}">${d >= 0 ? "+" : "−"}${Math.abs(d).toFixed(0)} cm vs normal</b> for the date, ${w} (median ${nh[2].toFixed(2)} m)</span>`; }
+  return "";
+}
 function renderStrip(stations, C) {
   $("strip").innerHTML = stations.map(s => {
     const q = lastWith(s.series || s.pts, "v"), h = lastWith(s.series || s.pts, "h"), src = s.series || s.pts;
@@ -809,12 +861,125 @@ function renderStrip(stations, C) {
       <span class="stn-name">${esc(stationLabel(s, C))}<small>${s.id}${s.approx ? ", approximate position" : ""}</small></span>
       ${q ? `<span class="stn-row q"><b>${fq(q.v)}</b> m³/s ${changeTxt(src, "v", 24)}</span>` : ""}
       ${h ? `<span class="stn-row h"><b>${h.h.toFixed(2)}</b> m ${changeTxt(src, "h", 24)}${lake ? ` <i>7 d ${changeTxt(src, "h", 168).replace(/<\/?i[^>]*>/g, "")}</i>` : ""}</span>` : ""}
+      ${normLine(s, q, h)}
       <span class="stn-read">${esc(stationNote(s, C))}${stationNote(s, C) ? ", " : ""}read ${read ? clock(read) : "?"}</span></button>`;
   }).join("");
 }
 
 let MAP = null, LAYER = null, RIVER = null, MARKERS = {}, FIT = null, USER_MOVED = false;
-function renderMap(stations, C) {
+let RIVER_LINES = null, SEC_LAYER = null, SEC_CTL = null, SEC_KIND = null, SEC_DAY = null, SEC_C = null;
+// Section boundaries, top of the river first. Only the weir is surveyed; the rest are approximate until confirmed.
+const DEFAULT_BOUNDS = [
+  { key: "weir", name: "Lake Cowichan weir", lat: 48.82591, lon: -124.05305, approx: false },
+  { key: "greendale", name: "Greendale Trestle", lat: 48.8185, lon: -124.0170, approx: true },
+  { key: "m702", name: "Mile 70.2 bridge (above Skutz Falls)", lat: 48.7845, lon: -123.9680, approx: true },
+  { key: "m66", name: "Mile 66 trestle (Marie Canyon)", lat: 48.7831, lon: -123.9011, approx: true },
+  { key: "sandy", name: "Sandy Pool boundary sign", lat: 48.7760, lon: -123.7750, approx: true },
+];
+const EDIT = /[?&]edit\b/.test(location.search);
+function loadBounds(C) {
+  try { const b = JSON.parse(localStorage.getItem("cowichan-bounds") || "null"); if (EDIT && Array.isArray(b) && b.length === 5) return b; } catch (e) { /* ignore */ }
+  return (C && Array.isArray(C.BOUNDARIES) && C.BOUNDARIES.length === 5) ? C.BOUNDARIES : DEFAULT_BOUNDS;
+}
+function splitSections(lines, bounds) {      // cut the river line into sections A-E at each boundary's longitude
+  const cuts = bounds.slice(1).map(b => b.lon), start = bounds[0].lon, out = { A: [], B: [], C: [], D: [], E: [] };
+  const secOf = lon => lon < start - 0.002 ? null : lon < cuts[0] ? "A" : lon < cuts[1] ? "B" : lon < cuts[2] ? "C" : lon < cuts[3] ? "D" : "E";
+  for (const ln of lines) {
+    let cur = [], sec = null;
+    for (let i = 0; i < ln.length; i++) {
+      const p = ln[i], s2 = secOf(p[1]);
+      if (i && s2 !== sec) {
+        const a = ln[i - 1], edges = [start - 0.002, ...cuts].filter(c => (a[1] - c) * (p[1] - c) < 0);
+        const c = edges.length ? edges[0] : null;
+        const mid = c == null ? p : [a[0] + (p[0] - a[0]) * (c - a[1]) / (p[1] - a[1]), c];
+        if (sec && cur.length) { cur.push(mid); out[sec].push(cur); }
+        cur = [mid];
+      }
+      sec = s2; cur.push(p);
+    }
+    if (sec && cur.length > 1) out[sec].push(cur);
+  }
+  return out;
+}
+function snapToRiver(lines, b) {             // where the river crosses this boundary's longitude, nearest its latitude
+  let best = null;
+  for (const ln of lines) for (let i = 1; i < ln.length; i++) {
+    const a = ln[i - 1], p = ln[i];
+    if ((a[1] - b.lon) * (p[1] - b.lon) > 0 || a[1] === p[1]) continue;
+    const lat = a[0] + (p[0] - a[0]) * (b.lon - a[1]) / (p[1] - a[1]);
+    if (!best || Math.abs(lat - b.lat) < Math.abs(best[0] - b.lat)) best = [lat, b.lon];
+  }
+  return best || [b.lat, b.lon];
+}
+function ruleStyle(rule) {
+  if (!rule) return { label: "Closed", color: "#7d8b88", dash: "2 7", weight: 3 };
+  const r = rule.split(" [")[0], flag = rule.includes("[");
+  if (r.startsWith("coho 1/day")) return { label: "Coho retention, 1 a day", color: "#f2667b", dash: flag ? "8 6" : null, weight: 5 };
+  if (r.startsWith("salmon C&R")) return { label: "Salmon catch and release", color: "#e8b64f", dash: flag ? "8 6" : null, weight: 5 };
+  if (r === "fly only") return { label: "Fly fishing only", color: "#6cc6b7", dash: null, weight: 5 };
+  return { label: "Open, gear OK", color: "#62d394", dash: null, weight: 5 };
+}
+function drawSections() {
+  if (!MAP || !RIVER_LINES || !SEC_C) return;
+  const C = SEC_C, d = SEC_DAY, kind = SEC_KIND, bounds = loadBounds(C);
+  const rules = Object.fromEntries(openSections(kind, d)), tr = Object.fromEntries(openSections("trout", d)), sa = Object.fromEntries(openSections("salmon", d));
+  const parts = splitSections(RIVER_LINES, bounds);
+  if (SEC_LAYER) SEC_LAYER.remove();
+  SEC_LAYER = L.layerGroup().addTo(MAP);
+  const used = new Map();
+  for (const k of Object.keys(parts)) {
+    const st = ruleStyle(rules[k]); used.set(st.label, st);
+    const tip = `<b>${esc(C.SECTION_SHORT[k])}</b><br><span style="color:var(--muted)">${esc(C.SECTIONS[k])}</span><br>
+      Trout and steelhead: ${tr[k] ? esc(tr[k]) : "closed"}<br>Salmon: ${sa[k] ? esc(sa[k].split(" [")[0]) : "closed"}${sa[k] && sa[k].includes("[") ? ' <span class="flag">confirm with DFO</span>' : ""}<br>
+      <span style="color:var(--faint);font-size:12px">Section ends are approximate. The table below the map is the reference.</span>`;
+    for (const ln of parts[k]) {
+      L.polyline(ln, { color: st.color, weight: 12, opacity: .14, interactive: false }).addTo(SEC_LAYER);
+      L.polyline(ln, { color: st.color, weight: st.weight, opacity: .95, dashArray: st.dash, lineCap: "round" }).bindPopup(tip, { maxWidth: 280 }).addTo(SEC_LAYER);
+    }
+  }
+  bounds.forEach((b, i) => {
+    const label = `${b.name}${b.approx ? " (approx.)" : ""}`;
+    if (EDIT) {
+      const m = L.marker([b.lat, b.lon], { draggable: true, title: label, icon: L.divIcon({ className: "pin-wrap", html: `<div class="dot" style="background:#fff"></div>`, iconSize: [0, 0] }) })
+        .bindTooltip(label, { permanent: true, direction: "right", className: "bound-lbl" }).addTo(SEC_LAYER);
+      m.on("dragend", () => { const ll = m.getLatLng(), nb = loadBounds(C).map(x => ({ ...x })); nb[i] = { ...nb[i], lat: +ll.lat.toFixed(5), lon: +ll.lng.toFixed(5), approx: false };
+        localStorage.setItem("cowichan-bounds", JSON.stringify(nb)); drawSections(); showEditBox(); });
+    } else {
+      L.circleMarker(i ? snapToRiver(RIVER_LINES, b) : [b.lat, b.lon], { radius: 4.5, color: "#0a1413", weight: 2, fillColor: "#e2ebe8", fillOpacity: 1 }).bindTooltip(label, { direction: "top" }).addTo(SEC_LAYER);
+    }
+  });
+  if (LAYER) LAYER.eachLayer(l => l.setZIndexOffset && l.setZIndexOffset(1000));
+  renderSecControl([...used.values()]);
+}
+function renderSecControl(styles) {
+  if (SEC_CTL) SEC_CTL.remove();
+  SEC_CTL = L.control({ position: "bottomright" });
+  SEC_CTL.onAdd = () => {
+    const div = L.DomUtil.create("div", "sec-ctl");
+    L.DomEvent.disableClickPropagation(div);
+    div.innerHTML = `<div class="kinds" role="group" aria-label="Show rules for">
+        <button type="button" data-k="trout" aria-pressed="${SEC_KIND === "trout"}">Trout and steelhead</button>
+        <button type="button" data-k="salmon" aria-pressed="${SEC_KIND === "salmon"}">Salmon</button></div>
+      <ul>${styles.map(st => `<li><i class="${st.dash ? "dash" : ""}" style="background:${st.color};color:${st.color}"></i>${esc(st.label)}${st.dash && st.label !== "Closed" ? ", confirm with DFO" : ""}</li>`).join("")}</ul>
+      <div class="fine">Open water today. Tap the river for a section's rules.</div>`;
+    div.querySelectorAll("button").forEach(b => b.onclick = () => { SEC_KIND = b.dataset.k; try { localStorage.setItem("cowichan-sec-kind", SEC_KIND); } catch (e) {} drawSections(); });
+    return div;
+  };
+  SEC_CTL.addTo(MAP);
+}
+function showEditBox() {
+  if (!EDIT) return;
+  let box = document.querySelector(".edit-box");
+  if (!box) { box = document.createElement("div"); box.className = "edit-box"; document.querySelector(".map-hero").appendChild(box); }
+  box.innerHTML = `<b>Edit section boundaries</b><br>Drag the white dots onto each boundary. Positions save in this browser; send me the text below to make them permanent for everyone.
+    <textarea readonly>${esc(JSON.stringify(loadBounds(SEC_C)))}</textarea>
+    <button type="button" class="refresh" id="bounds-reset">Reset to defaults</button>`;
+  box.querySelector("#bounds-reset").onclick = () => { localStorage.removeItem("cowichan-bounds"); drawSections(); showEditBox(); };
+}
+function renderMap(stations, C, day, bestKind) {
+  SEC_C = C; SEC_DAY = day;
+  if (!SEC_KIND) { try { SEC_KIND = localStorage.getItem("cowichan-sec-kind"); } catch (e) { /* ignore */ } }
+  if (SEC_KIND !== "trout" && SEC_KIND !== "salmon") SEC_KIND = bestKind;
   if (!window.L) { $("map").innerHTML = `<p style="padding:18px;color:var(--muted)">The map library didn't load. Gauge readings are listed below.</p>`; return; }
   if (!MAP) {
     MAP = L.map("map", { scrollWheelZoom: false, zoomControl: true, zoomSnap: 0.25 });
@@ -832,10 +997,9 @@ function renderMap(stations, C) {
     L.control.layers({ "Dark": dark, "Terrain": topo, "Satellite": sat }, null, { position: "topright" }).addTo(MAP);
     riverLine().then(lines => {
       if (!lines.length) return;
-      RIVER = L.layerGroup(lines.flatMap(ln => [
-        L.polyline(ln, { color: "#6cc6b7", weight: 9, opacity: .16, interactive: false }),
-        L.polyline(ln, { color: "#6cc6b7", weight: 2.6, opacity: .95, interactive: false })])).addTo(MAP);
-      RIVER.eachLayer(l => l.bringToBack());
+      RIVER_LINES = lines;
+      RIVER = L.layerGroup(lines.map(ln => L.polyline(ln, { color: "#6cc6b7", weight: 2, opacity: .35, interactive: false }))).addTo(MAP);
+      drawSections(); showEditBox();
     }).catch(e => console.warn("river line:", e));
   }
   if (LAYER) LAYER.remove();
@@ -864,6 +1028,7 @@ function renderMap(stations, C) {
     MAP.setView(m.getLatLng(), Math.max(MAP.getZoom(), 12)); m.openPopup(); $("map").scrollIntoView({ block: "nearest", behavior: "smooth" });
   });
   setTimeout(() => { MAP.invalidateSize(); if (!USER_MOVED) FIT(); }, 300);
+  drawSections();
 }
 function sparkSvg(pts, key, color, w = 220, h = 28) {
   const v = pts.filter(p => p[key] != null); if (v.length < 2) return "";
@@ -878,14 +1043,24 @@ function miniChart(series, key, opt) {
   if (v.length < 2) return { html: `<div class="none">${key === "v" ? (opt.lake ? "Lake gauge, level only" : "No flow readings") : "No level readings"}</div>` };
   const W = Math.max(240, Math.round(opt.W || 600)), Hh = 74, pl = 34, pr = 8, ptp = 6, pb = 16, log = key === "v";
   const t0 = opt.t0, t1 = opt.t1;
-  let mn = Math.min(...v.map(p => p[key])), mx = Math.max(...v.map(p => p[key]));
+  const norm = [];                               // normal band per day across the window
+  if (opt.normals) for (let d = pt(t0).date; ptToUtc(d, 12) <= t1 + DAY; d = addDays(d, 1)) {
+    const n = opt.normals[d.slice(5)]; if (n) norm.push([ptToUtc(d, 12), n]);
+  }
+  let mn = Math.min(...v.map(p => p[key]), ...norm.map(x => x[1][0])), mx = Math.max(...v.map(p => p[key]), ...norm.map(x => x[1][4]));
   if (log) { mn = Math.max(0.5, mn * 0.85); mx = Math.max(mx * 1.12, mn * 2); } else { const pad = Math.max(0.03, (mx - mn) * 0.12); mn -= pad; mx += pad; }
   const f = log ? Math.log : (x => x), fmn = f(mn), fmx = f(mx);
   const X = t => pl + (t - t0) / (t1 - t0) * (W - pl - pr);
   const Y = q => ptp + (1 - (f(Math.min(Math.max(q, mn), mx)) - fmn) / (fmx - fmn)) * (Hh - ptp - pb);
   const col = key === "v" ? "var(--riffle)" : "var(--level)";
   let g = `<svg viewBox="0 0 ${W} ${Hh}" role="img" aria-label="${esc(opt.label)}">`;
-  if (opt.band) { const ya = Y(Math.min(opt.band[1], mx)), yb = Y(Math.max(opt.band[0], mn)); if (yb > ya) g += `<rect x="${pl}" y="${ya}" width="${W - pl - pr}" height="${yb - ya}" fill="var(--riffle-softer)"/>`; }
+  if (norm.length > 1) {
+    const xs = x => Math.min(W - pr, Math.max(pl, X(x)));
+    const area = (i, j) => norm.map(([t, n]) => `${xs(t).toFixed(1)},${Y(n[i]).toFixed(1)}`).join(" ") + " " +
+      norm.slice().reverse().map(([t, n]) => `${xs(t).toFixed(1)},${Y(n[j]).toFixed(1)}`).join(" ");
+    g += `<polygon points="${area(0, 4)}" fill="var(--ink)" opacity=".07"/><polygon points="${area(1, 3)}" fill="var(--ink)" opacity=".11"/>`;
+    g += `<polyline points="${norm.map(([t, n]) => `${xs(t).toFixed(1)},${Y(n[2]).toFixed(1)}`).join(" ")}" fill="none" stroke="var(--muted)" stroke-width="1" stroke-dasharray="3 3" opacity=".7"/>`;
+  }
   const ticks = log ? [1, 2, 5, 10, 20, 50, 100, 200, 500].filter(t => t > mn && t < mx) : [mn + (mx - mn) * .25, mn + (mx - mn) * .75];
   for (const t of ticks.slice(-3)) {
     g += `<line x1="${pl}" x2="${W - pr}" y1="${Y(t)}" y2="${Y(t)}" stroke="var(--line)" vector-effect="non-scaling-stroke"/>`;
@@ -928,20 +1103,22 @@ function renderCharts(stations, scores, C, nowMs) {
     const hasQ = src.some(p => p.v != null), hasH = src.some(p => p.h != null);
     if (!hasQ && !hasH) continue;
     const row = document.createElement("div"); row.className = "crow";
-    row.innerHTML = `<div class="cname">${esc(stationLabel(s, C))}<small>${s.id}${primary && s.id === C.stations.lower ? `, shaded: ${esc(primary.sp.name.toLowerCase())} sweet spot` : ""}</small></div>`;
+    row.innerHTML = `<div class="cname">${esc(stationLabel(s, C))}<small>${s.id}</small></div>`;
     box.appendChild(row);
     for (const key of ["v", "h"]) {
       const fig = document.createElement("figure"); fig.className = `mini ${key === "v" ? "q" : "h"}`; fig.style.margin = "0";
       row.appendChild(fig);
       const last = lastWith(src, key);
-      const ch = miniChart(src, key, { t0, t1, W: fig.clientWidth, lake: /^COWICHAN LAKE/i.test(s.name),
-        label: `${stationLabel(s, C)} ${key === "v" ? "flow" : "level"}, last 30 days`,
-        band: key === "v" && primary && s.id === C.stations.lower ? primary.sp.good_flow : null });
+      const N = NORMALS && NORMALS.stations && NORMALS.stations[s.id];
+      const normals = N ? (key === "v" ? N.flow : (levelComparable(NORMALS, s.id, src) ? N.level : null)) : null;
+      const ch = miniChart(src, key, { t0, t1, W: fig.clientWidth, lake: /^COWICHAN LAKE/i.test(s.name), normals,
+        label: `${stationLabel(s, C)} ${key === "v" ? "flow" : "level"}, last 30 days` });
       fig.innerHTML = `<div class="cap"><span>${key === "v" ? "Flow, m³/s" : "Level, m"}</span>${last ? `<b>${key === "v" ? fq(last.v) : last.h.toFixed(2)}</b>` : ""}</div>${ch.html}`;
       attachHover(fig, ch, key);
     }
   }
   if (!box.children.length) box.innerHTML = `<p class="lede">No gauge history available right now.</p>`;
+  $("norm-note").textContent = NORMALS ? `Grey band: the normal range for each date (middle half darker), dashed line the median, from ${NORMALS.flow_years} flows and ${NORMALS.level_years} levels.` : "";
 }
 
 function renderForecast(wxu, wxl, outlook, today, C) {
@@ -1016,7 +1193,8 @@ async function load() {
   const status = $("status");
   status.className = "status"; status.textContent = "Loading live gauge data";
   try {
-    const [cfgR, snapR] = await Promise.allSettled([getJSON("config.json?" + Date.now()), getJSON("snapshot.json?" + Date.now())]);
+    const [cfgR, snapR, normR] = await Promise.allSettled([getJSON("config.json?" + Date.now()), getJSON("snapshot.json?" + Date.now()), getJSON("normals.json?v=1")]);
+    NORMALS = normR.status === "fulfilled" ? normR.value : null;
     if (cfgR.status !== "fulfilled") throw new Error("Settings file config.json is missing. Run the GitHub workflow once to publish it.");
     const C = cfgR.value, snap = snapR.status === "fulfilled" ? snapR.value : null;
     C.EGG_RAMP = C.EGG_RAMP || [[10, 25], [11, 5]];
@@ -1063,7 +1241,8 @@ async function load() {
     others.forEach((s, i) => { if (extra[i].status === "fulfilled") s.series = extra[i].value; });
 
     renderHero(c, scores, heads, C);
-    renderMap(stations, C); renderStrip(stations, C);
+    const top = scores.filter(s => s.score > 0).sort((a, b) => b.score - a.score)[0];
+    renderMap(stations, C, c.day, top && top.sp.kind === "salmon" ? "salmon" : "trout"); renderStrip(stations, C);
     renderFisheries(scores, C); renderGauge(c, scores, C);
     renderStats(c); renderHeads(heads);
     renderCharts(stations, scores, C, evalAt);
