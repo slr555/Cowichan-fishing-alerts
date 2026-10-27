@@ -59,6 +59,21 @@ The schedule lists each run twice, one for daylight time and one for standard ti
 
 The workflow commits `state.json` after each run. That file is the alert's memory: last ratings, heads-ups already sent, regulation baselines and the season's first fall freshet. The first run captures the regulation baselines silently. The regular commits should also keep GitHub from disabling the schedule for inactivity.
 
+## The web page
+`docs/index.html` is a single page you can open anytime: verdict, flow gauge, fishery scores, river and weather, a map of every reporting gauge in the watershed, the last 30 days of flow, the 7-day forecast and weekend outlook, how to fish each species, which sections are open today, and recent alerts.
+
+It's live. When you open it, it pulls the gauges from Water Survey of Canada and the weather from Open-Meteo, then runs the same scoring as the alert. It refreshes itself every 10 minutes while open. If the gauge service can't be reached from your browser, it falls back to the data from the last scheduled run and says so at the top.
+
+**Setup (one time):**
+1. Add `docs/index.html` to the repo. In the web editor, drop it into a new `docs` folder.
+2. Replace `cowichan_alert.py` and `.github/workflows/cowichan-alert.yml` with the new versions.
+3. Settings → General → Danger Zone → **Change visibility** → Public. Free GitHub accounts need a public repo for Pages. Your ntfy topics stay hidden, since they're secrets.
+4. Settings → **Pages** → Build and deployment → Source: **Deploy from a branch**, Branch: `main`, folder `/docs` → Save.
+5. Run the workflow once. It writes `docs/config.json` (all the bands, weights and gear text) and `docs/snapshot.json` (fallback data, alert history).
+6. After a minute or two, the page is at `https://YOUR-USERNAME.github.io/YOUR-REPO/`. On your phone, use Share → Add to Home Screen.
+
+All tuning (`SPECIES`, `CARDS`, `PROJ`, thresholds) lives in the Python and reaches the page through `config.json` on the next run. The scoring *logic* is mirrored in `index.html`, between the `CORE-BEGIN` and `CORE-END` markers. If you change how scores are calculated in the Python, change it there too.
+
 ## A friend's feed
 A friend can get their own feed, with their own topic and settings. They don't need GitHub access.
 
