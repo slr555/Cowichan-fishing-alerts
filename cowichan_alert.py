@@ -1143,6 +1143,20 @@ def export_site(c, scores, flow, weir, wxu, wxl, state, now):
         "python": {"phase": c.phase, "q_now": c.q_now,
                    "scores": {s.sp["key"]: s.score for s in scores}},   # for checking the page's maths
     }
+    river = os.path.join(SITE_DIR, "river.json")   # river line for the map, fetched once from OpenStreetMap
+    if not os.path.exists(river):
+        try:
+            q = ('[out:json][timeout:90];way["waterway"="river"]["name"="Cowichan River"]'
+                 '(48.70,-124.12,48.86,-123.55);out geom;')
+            d = json.loads(http_get("https://overpass-api.de/api/interpreter?data=" + urllib.parse.quote(q), timeout=120))
+            lines = [[[round(g["lat"], 5), round(g["lon"], 5)] for g in e["geometry"]]
+                     for e in d.get("elements", []) if e.get("geometry")]
+            if lines:
+                with open(river, "w", encoding="utf-8") as f:
+                    json.dump({"source": "OpenStreetMap contributors (ODbL)", "lines": lines}, f, separators=(",", ":"))
+                print(f"river line saved ({len(lines)} segments)")
+        except Exception as e:  # noqa: BLE001
+            print(f"river line fetch failed, will retry next run: {e}")
     for name, data in (("config.json", cfg), ("snapshot.json", snap)):
         with open(os.path.join(SITE_DIR, name), "w", encoding="utf-8") as f:
             json.dump(data, f, separators=(",", ":"), default=str)
