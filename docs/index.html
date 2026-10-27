@@ -158,15 +158,15 @@ h3 { font: 600 18px/1.2 var(--display); margin: 14px 0 6px; }
 
 /* small-multiple charts */
 .charts { display: grid; gap: 10px; }
-.crow { display: grid; grid-template-columns: 150px 1fr 1fr; gap: 14px; align-items: center; padding: 8px 0; border-bottom: 1px solid var(--line); }
-.crow .cname { font: 600 17px/1.15 var(--display); }
-.crow .cname small { display: block; font: 400 12px var(--body); color: var(--faint); }
+.crow { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 26px; padding: 14px 0 16px; border-bottom: 1px solid var(--line); }
+.crow .cname { grid-column: 1 / -1; font: 600 21px/1.15 var(--display); }
+.crow .cname small { font: 400 13px var(--body); color: var(--faint); margin-left: 8px; }
 .mini { position: relative; }
-.mini .cap { display: flex; justify-content: space-between; font-size: 12.5px; color: var(--muted); margin-bottom: 2px; }
-.mini .cap b { font: 600 15px var(--display); font-variant-numeric: tabular-nums; }
+.mini .cap { display: flex; justify-content: space-between; align-items: baseline; font-size: 14px; color: var(--muted); margin-bottom: 4px; }
+.mini .cap b { font: 700 19px var(--display); font-variant-numeric: tabular-nums; }
 .mini.q .cap b { color: var(--riffle); } .mini.h .cap b { color: var(--level); }
 .mini svg { width: 100%; height: auto; display: block; touch-action: pan-y; }
-.mini .none { height: 74px; display: flex; align-items: center; color: var(--faint); font-size: 13px; }
+.mini .none { height: 120px; display: flex; align-items: center; color: var(--faint); font-size: 14px; }
 .tip { position: fixed; pointer-events: none; z-index: 1000; background: var(--raised); border: 1px solid var(--line); border-radius: 6px;
   padding: 4px 8px; font-size: 12.5px; white-space: nowrap; display: none; font-variant-numeric: tabular-nums; }
 
@@ -215,14 +215,12 @@ footer p { max-width: 84ch; margin: 0 0 6px; }
 
 @media (max-width: 860px) {
   .two { grid-template-columns: 1fr; gap: 10px; }
-  .crow { grid-template-columns: 1fr 1fr; }
-  .crow .cname { grid-column: 1 / -1; }
+  .crow { gap: 6px 18px; }
 }
 @media (max-width: 640px) {
   #map { height: clamp(320px, 56vh, 520px); }
   .verdict-panel { position: static; max-width: none; border: 0; border-top: 1px solid var(--line); border-radius: 0; background: var(--surface); backdrop-filter: none; }
-  .crow { gap: 4px 10px; }
-  .mini .cap { font-size: 12px; }
+  .crow { grid-template-columns: 1fr; gap: 10px; }
   .alerts li { grid-template-columns: 1fr; gap: 0; }
   .strip { grid-template-columns: 1fr; gap: 8px; }
   .stn { grid-template-columns: 1fr auto; column-gap: 12px; padding: 9px 12px; }
@@ -1040,42 +1038,57 @@ function sparkSvg(pts, key, color, w = 220, h = 28) {
 // Small, condensed 30-day chart for one variable of one station.
 function miniChart(series, key, opt) {
   const v = series.filter(p => p[key] != null && (key !== "v" || p[key] > 0));
-  if (v.length < 2) return { html: `<div class="none">${key === "v" ? (opt.lake ? "Lake gauge, level only" : "No flow readings") : "No level readings"}</div>` };
-  const W = Math.max(240, Math.round(opt.W || 600)), Hh = 74, pl = 34, pr = 8, ptp = 6, pb = 16, log = key === "v";
-  const t0 = opt.t0, t1 = opt.t1;
+  if (v.length < 2) return { html: `<div class="none">${key === "v" ? (opt.lake ? "Lake gauge: level only, no flow" : "No flow readings") : "No level readings"}</div>` };
+  const W = Math.max(280, Math.round(opt.W || 600)), Hh = narrow() ? 170 : 200, pl = 46, pr = 52, ptp = 22, pb = 26, log = key === "v";
+  const t0 = opt.t0, t1 = opt.t1, fs = 13;
   const norm = [];                               // normal band per day across the window
   if (opt.normals) for (let d = pt(t0).date; ptToUtc(d, 12) <= t1 + DAY; d = addDays(d, 1)) {
     const n = opt.normals[d.slice(5)]; if (n) norm.push([ptToUtc(d, 12), n]);
   }
   let mn = Math.min(...v.map(p => p[key]), ...norm.map(x => x[1][0])), mx = Math.max(...v.map(p => p[key]), ...norm.map(x => x[1][4]));
-  if (log) { mn = Math.max(0.5, mn * 0.85); mx = Math.max(mx * 1.12, mn * 2); } else { const pad = Math.max(0.03, (mx - mn) * 0.12); mn -= pad; mx += pad; }
+  if (log) { mn = Math.max(0.5, mn * 0.85); mx = Math.max(mx * 1.12, mn * 2); } else { const pad = Math.max(0.03, (mx - mn) * 0.1); mn -= pad; mx += pad; }
   const f = log ? Math.log : (x => x), fmn = f(mn), fmx = f(mx);
   const X = t => pl + (t - t0) / (t1 - t0) * (W - pl - pr);
   const Y = q => ptp + (1 - (f(Math.min(Math.max(q, mn), mx)) - fmn) / (fmx - fmn)) * (Hh - ptp - pb);
-  const col = key === "v" ? "var(--riffle)" : "var(--level)";
+  const col = key === "v" ? "var(--riffle)" : "var(--level)", unit = key === "v" ? "m³/s" : "m";
+  const lab = x => key === "v" ? fq(x) : x.toFixed(2);
   let g = `<svg viewBox="0 0 ${W} ${Hh}" role="img" aria-label="${esc(opt.label)}">`;
+  // weekly gridlines and dates
+  const firstDay = pt(t0).date;
+  for (let i = 0; i <= 31; i++) {
+    const d = addDays(firstDay, i); if (pyWeekday(d) !== 0) continue;         // Mondays
+    const x = X(ptToUtc(d, 0)); if (x < pl || x > W - pr) continue;
+    g += `<line x1="${x}" x2="${x}" y1="${ptp}" y2="${Hh - pb}" stroke="var(--line)"/>`;
+    if (x > pl + 22 && x < W - pr - 10) g += `<text x="${x}" y="${Hh - 7}" font-size="${fs}" text-anchor="middle" fill="var(--muted)" font-family="var(--body)">${shortDate(d)}</text>`;
+  }
+  // value gridlines
+  let ticks;
+  if (log) { ticks = [1, 2, 3, 5, 10, 20, 30, 50, 100, 200, 300, 500].filter(t => t >= mn && t <= mx); while (ticks.length > 5) ticks = ticks.filter((_, i) => i % 2 === 0); }
+  else { const step = [0.05, 0.1, 0.2, 0.25, 0.5, 1].find(st => (mx - mn) / st <= 5) || 1; ticks = []; for (let t = Math.ceil(mn / step) * step; t <= mx; t += step) ticks.push(+t.toFixed(2)); }
+  for (const t of ticks) {
+    g += `<line x1="${pl}" x2="${W - pr}" y1="${Y(t)}" y2="${Y(t)}" stroke="var(--line)"/>`;
+    g += `<text x="${pl - 7}" y="${Y(t) + 4.5}" font-size="${fs}" text-anchor="end" fill="var(--muted)" font-family="var(--body)">${log ? t : t.toFixed(2)}</text>`;
+  }
+  g += `<text x="${pl - 7}" y="12" font-size="11.5" text-anchor="end" fill="var(--faint)" font-family="var(--body)">${unit}</text>`;
+  // normal range for the date
   if (norm.length > 1) {
     const xs = x => Math.min(W - pr, Math.max(pl, X(x)));
     const area = (i, j) => norm.map(([t, n]) => `${xs(t).toFixed(1)},${Y(n[i]).toFixed(1)}`).join(" ") + " " +
       norm.slice().reverse().map(([t, n]) => `${xs(t).toFixed(1)},${Y(n[j]).toFixed(1)}`).join(" ");
     g += `<polygon points="${area(0, 4)}" fill="var(--ink)" opacity=".07"/><polygon points="${area(1, 3)}" fill="var(--ink)" opacity=".11"/>`;
-    g += `<polyline points="${norm.map(([t, n]) => `${xs(t).toFixed(1)},${Y(n[2]).toFixed(1)}`).join(" ")}" fill="none" stroke="var(--muted)" stroke-width="1" stroke-dasharray="3 3" opacity=".7"/>`;
+    g += `<polyline points="${norm.map(([t, n]) => `${xs(t).toFixed(1)},${Y(n[2]).toFixed(1)}`).join(" ")}" fill="none" stroke="var(--muted)" stroke-width="1.4" stroke-dasharray="4 4"/>`;
+    const lastN = norm[norm.length - 1][1], yv = Y(v[v.length - 1][key]);
+    let yn = Y(lastN[2]); if (Math.abs(yn - yv) < 17) yn = yv + (yn >= yv ? 17 : -17);   // keep clear of the value label
+    g += `<text x="${W - pr + 6}" y="${Math.min(Hh - pb, Math.max(ptp + 8, yn + 4.5))}" font-size="11.5" fill="var(--muted)" font-family="var(--body)">normal</text>`;
   }
-  const ticks = log ? [1, 2, 5, 10, 20, 50, 100, 200, 500].filter(t => t > mn && t < mx) : [mn + (mx - mn) * .25, mn + (mx - mn) * .75];
-  for (const t of ticks.slice(-3)) {
-    g += `<line x1="${pl}" x2="${W - pr}" y1="${Y(t)}" y2="${Y(t)}" stroke="var(--line)" vector-effect="non-scaling-stroke"/>`;
-    g += `<text x="${pl - 5}" y="${Y(t) + 4}" font-size="11" text-anchor="end" fill="var(--faint)" font-family="var(--body)">${log ? t : t.toFixed(2)}</text>`;
-  }
-  for (let i = 0; i <= 30; i += 10) {
-    const d = addDays(pt(t0).date, i), x = X(ptToUtc(d, 0));
-    if (x > pl + 18 && x < W - pr - 22) g += `<text x="${x}" y="${Hh - 3}" font-size="11" text-anchor="middle" fill="var(--faint)" font-family="var(--body)">${shortDate(d)}</text>`;
-  }
+  // the readings
   const d = v.map((p, i) => `${i ? "L" : "M"}${X(p.t).toFixed(1)},${Y(p[key]).toFixed(1)}`).join("");
   g += `<path d="${d}L${X(v[v.length - 1].t).toFixed(1)},${Hh - pb}L${X(v[0].t).toFixed(1)},${Hh - pb}Z" fill="${key === "v" ? "var(--riffle-softer)" : "var(--level-soft)"}"/>`;
-  g += `<path d="${d}" fill="none" stroke="${col}" stroke-width="2" vector-effect="non-scaling-stroke" stroke-linejoin="round"/>`;
+  g += `<path d="${d}" fill="none" stroke="${col}" stroke-width="2.6" stroke-linejoin="round"/>`;
   const last = v[v.length - 1];
-  g += `<circle cx="${X(last.t)}" cy="${Y(last[key])}" r="3.5" fill="var(--coho)"/>`;
-  g += `<line class="hx" x1="0" x2="0" y1="${ptp}" y2="${Hh - pb}" stroke="var(--ink)" opacity="0" vector-effect="non-scaling-stroke"/></svg>`;
+  g += `<circle cx="${X(last.t)}" cy="${Y(last[key])}" r="5" fill="var(--coho)"/>`;
+  g += `<text x="${X(last.t) + 9}" y="${Y(last[key]) + 5}" font-size="15" font-weight="700" fill="${col}" font-family="var(--display)">${lab(last[key])}</text>`;
+  g += `<line class="hx" x1="0" x2="0" y1="${ptp}" y2="${Hh - pb}" stroke="var(--ink)" opacity="0"/></svg>`;
   return { html: g, v, X, W, pl, pr, t0, t1 };
 }
 function attachHover(box, ch, key) {
@@ -1106,19 +1119,21 @@ function renderCharts(stations, scores, C, nowMs) {
     row.innerHTML = `<div class="cname">${esc(stationLabel(s, C))}<small>${s.id}</small></div>`;
     box.appendChild(row);
     for (const key of ["v", "h"]) {
+      if (key === "v" && !hasQ) continue;
       const fig = document.createElement("figure"); fig.className = `mini ${key === "v" ? "q" : "h"}`; fig.style.margin = "0";
+      if (!hasQ) fig.style.gridColumn = "1 / -1";
       row.appendChild(fig);
       const last = lastWith(src, key);
       const N = NORMALS && NORMALS.stations && NORMALS.stations[s.id];
       const normals = N ? (key === "v" ? N.flow : (levelComparable(NORMALS, s.id, src) ? N.level : null)) : null;
       const ch = miniChart(src, key, { t0, t1, W: fig.clientWidth, lake: /^COWICHAN LAKE/i.test(s.name), normals,
         label: `${stationLabel(s, C)} ${key === "v" ? "flow" : "level"}, last 30 days` });
-      fig.innerHTML = `<div class="cap"><span>${key === "v" ? "Flow, m³/s" : "Level, m"}</span>${last ? `<b>${key === "v" ? fq(last.v) : last.h.toFixed(2)}</b>` : ""}</div>${ch.html}`;
+      fig.innerHTML = `<div class="cap"><span>${key === "v" ? "Flow" : "Water level"}${normals ? ", with the normal range" : ""}</span>${last ? `<b>${key === "v" ? fq(last.v) + " m³/s" : last.h.toFixed(2) + " m"}</b>` : ""}</div>${ch.html}`;
       attachHover(fig, ch, key);
     }
   }
   if (!box.children.length) box.innerHTML = `<p class="lede">No gauge history available right now.</p>`;
-  $("norm-note").textContent = NORMALS ? `Grey band: the normal range for each date (middle half darker), dashed line the median, from ${NORMALS.flow_years} flows and ${NORMALS.level_years} levels.` : "";
+  $("norm-note").textContent = NORMALS ? `Grey band: the normal range for each date (darker middle half is typical), dashed line the median. Red dot: the latest reading. Touch a chart for exact values.` : "";
 }
 
 function renderForecast(wxu, wxl, outlook, today, C) {
