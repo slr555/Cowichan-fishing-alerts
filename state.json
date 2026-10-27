@@ -5,12 +5,22 @@
   },
   "good_alert_at": {},
   "heads": [],
+  "history": [
+    {
+      "kinds": [
+        "daily"
+      ],
+      "priority": "2",
+      "t": "2026-10-27T14:55:45.860919+00:00",
+      "title": "Cowichan daily: best is Trout egg bite 4.9"
+    }
+  ],
   "last_outlook": "2026-10-22",
-  "last_run": "2026-10-27T13:47:46.186653+00:00",
+  "last_run": "2026-10-27T14:55:45.860919+00:00",
   "regs": {
     "BC in-season changes": {
       "alerted": false,
-      "fails": 1,
+      "fails": 0,
       "rows": [
         "Cowichan River | No fishing | July 4, 2025 to August 31, 2025"
       ]
@@ -23,8 +33,9 @@
       ]
     }
   },
+  "regs_checked_at": "2026-10-27T14:55:45.860919+00:00",
   "season": {
-    "fall_freshet": "2026-10-18T16:55:00+00:00",
+    "fall_freshet": "2026-10-17T20:55:00+00:00",
     "key": 2026
   },
   "tiers": {
