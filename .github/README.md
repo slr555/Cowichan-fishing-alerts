@@ -1,0 +1,123 @@
+# Cowichan fishing alert (v2)
+
+Runs twice a day on GitHub Actions, at about 4:37am and 5:07pm Pacific. It reads the Cowichan gauges and the weather forecast, scores five fisheries against Cowichan-specific flow bands and the regulation calendar, and pushes to your phone through ntfy only when something changes.
+
+## What it watches
+- **Flow:** Water Survey of Canada 08HA011 (near Duncan) and 08HA002 (weir release at Lake Cowichan).
+- **Weather:** Open-Meteo. Rain comes from Lake Cowichan; temperature, barometer, cloud and sunrise/sunset come from Duncan.
+- **Regulations:** the DFO Region 1 salmon table and the BC in-season changes page. You get an alert when a Cowichan line changes.
+- **Its own health:** a failed or stale gauge feed sends a "data problem" alert (at most once a day), then a "data feeds back" note when it recovers. The regulation watcher alerts after 3 failed reads in a row, which usually means a page was redesigned.
+
+## Fisheries scored
+| Fishery | Season | Sweet spot / fishable (m3/s) | Notes |
+|---|---|---|---|
+| Coho | Oct to Jan (peak Nov) | 20-80 / 10-130 | bonus for fresh-fish push flows of 28-45 |
+| Chum | Oct to Dec | 15-90 / 8-140 | retention TBD, treated as C&R |
+| Winter steelhead | Dec to Apr (peak Feb-Mar) | 25-100 / 12-160 | "fish the soft edges" note at high flow |
+| Trout egg bite | Oct to Jan | 10-80 / 6-120 | ramps up after the first fall freshet or weir release |
+| Spring trout | Mar to Jun | 8-45 / 5-80 | salmon-fry streamer bonus from late March |
+
+### How the numbers were calibrated
+The bands and timing were replayed against 2006-2025 daily flows from the Duncan gauge (08HA011) and the weir gauge (08HA002):
+- **Winter flows are high.** The median is 77 m³/s in November, 97 in December and 108 in January, so the bands are sized for that.
+- **The river drops slowly.** Flow above the weir release falls about 15% a day, so "dropping after a freshet" lasts up to 14 days (`DROP_DAYS`). The weekend projection also uses the measured rate.
+- **Expected alert counts.** In the replay, a typical season gave about 2 GOOD alerts for coho, 4 for steelhead, 3 for the egg bite and 3 for spring trout, mostly in November (salmon, egg bite) and February-March (steelhead).
+- **No flip-flopping.** A GOOD window only closes below 6.5 (`GOOD_EXIT`). A window that reopens within 72 hours of its last alert stays quiet, and short blips under 24 hours get no "window closing" note.
+- **Weir releases** are detected as a rise of 20% and 1 m³/s or more against the lowest outflow of the past 72 hours. That catches gradual step-ups like fall 2025, and small drought-year steps like 5.5 → 7 m³/s in October 2026 (`WEIR_JUMP`).
+- **The egg bite doesn't wait for rain.** It normally builds after the first fall freshet or weir release. In a dry fall, a date-based floor brings it up from October 25 to full strength by November 5 anyway, since chinook spawn regardless and returns have topped 10,000 every year since 2017 (`EGG_RAMP`).
+
+The replay used daily averages and neutral weather, so it checks that the alert behaves sensibly, not that the fishing was good. Your own results are still the best tuning.
+
+Every score is gated by the regulation calendar in `open_sections()`, built from the 2025-2027 synopsis and the DFO table. If nothing is open for a species on that date, it scores 0. A drought hold caps scores in Sep-Oct when Duncan is below 7 m3/s.
+
+## When it pushes
+- A species moves up to GOOD (priority 4), or drops out of GOOD ("window closing", priority 2).
+- A new heads-up appears: a weir release was raised, a window is forming, rain is coming to freshen the river, or good conditions are about to blow out.
+- A regulation change or a data problem.
+- **Thursday's 5pm run** also sends a weekend outlook. It ranks Fri, Sat and Sun on a rough flow projection and includes the strategy card for the best bet.
+- With `ALWAYS_SEND=true`, the **evening run** also sends a daily summary even when nothing changed. Morning runs still only push on changes. Manual runs always send, so tests show up on your phone.
+
+## What a notification looks like
+The phone gets a short version:
+- The day it's for. Morning runs say "Today"; evening runs say "Tomorrow", since you're planning the next first light.
+- Each fishery with its score and the top reason.
+- Flow, rain, temperature and sun times.
+- Any heads-ups.
+- A compact plan for the best species: section, gear, fly, the play, and timing.
+
+There are three buttons: **Gauge**, **Regs** and **Full report**. Full report opens the GitHub run summary, which has every reason, the full strategy card and the links. The notification is plain text with emoji, so it looks the same in the iPhone and Android apps.
+
+## Setup
+1. Install the **ntfy** app and subscribe to a random topic, e.g. `cowichan-x7k2q9`. Anyone who knows the topic can read it.
+2. Create a **private** GitHub repo containing `cowichan_alert.py` and `.github/workflows/cowichan-alert.yml`.
+3. Under Settings → Secrets and variables → Actions (the topic name only; a full ntfy URL also works):
+   - Add the secret `NTFY_TOPIC`.
+   - Optionally set the variable `ALWAYS_SEND=true` to get every run while you calibrate.
+4. Go to Actions → Cowichan fishing alert → Run workflow. Tick "weekend outlook" to test that too.
+
+The schedule lists each run twice, one for daylight time and one for standard time, because GitHub's clock is UTC. The script runs the one that matches and skips the other within seconds, so you'll see four runs a day on the Actions tab, two of them very short.
+
+The workflow commits `state.json` after each run. That file is the alert's memory: last ratings, heads-ups already sent, regulation baselines and the season's first fall freshet. The first run captures the regulation baselines silently. The regular commits should also keep GitHub from disabling the schedule for inactivity.
+
+## The web page
+`docs/index.html` is a single page you can open anytime: verdict, flow gauge, fishery scores, river and weather, a map of every reporting gauge in the watershed, the last 30 days of flow, the 7-day forecast and weekend outlook, how to fish each species, which sections are open today, and recent alerts.
+
+It's live. When you open it, it pulls the gauges from Water Survey of Canada and the weather from Open-Meteo, then runs the same scoring as the alert. It refreshes itself every 10 minutes while open. If the gauge service can't be reached from your browser, it falls back to the data from the last scheduled run and says so at the top.
+
+**Setup (one time):**
+1. Add `docs/index.html` to the repo. In the web editor, drop it into a new `docs` folder.
+2. Replace `cowichan_alert.py` and `.github/workflows/cowichan-alert.yml` with the new versions.
+3. Settings → General → Danger Zone → **Change visibility** → Public. Free GitHub accounts need a public repo for Pages. Your ntfy topics stay hidden, since they're secrets.
+4. Settings → **Pages** → Build and deployment → Source: **Deploy from a branch**, Branch: `main`, folder `/docs` → Save.
+5. Run the workflow once. It writes `docs/config.json` (all the bands, weights and gear text) and `docs/snapshot.json` (fallback data, alert history).
+6. After a minute or two, the page is at `https://YOUR-USERNAME.github.io/YOUR-REPO/`. On your phone, use Share → Add to Home Screen.
+
+All tuning (`SPECIES`, `CARDS`, `PROJ`, thresholds) lives in the Python and reaches the page through `config.json` on the next run. The scoring *logic* is mirrored in `index.html`, between the `CORE-BEGIN` and `CORE-END` markers. If you change how scores are calculated in the Python, change it there too.
+
+## A friend's feed
+A friend can get their own feed, with their own topic and settings. They don't need GitHub access.
+
+1. Pick a second random topic, e.g. `cowichan-buddy-m4p8z1`. Your friend subscribes to it in their ntfy app; they shouldn't use your topic.
+2. Add the secret `NTFY_TOPIC_FRIEND` with that topic name.
+3. Optionally, add these variables:
+
+| Variable | What it does | Default |
+|---|---|---|
+| `FRIEND_ALERTS` | Which alert types they get, comma separated: `good`, `headsup`, `closing`, `daily`, `weekend`, `regs`, `system`, or `all` | `good,weekend` |
+| `FRIEND_SPECIES` | Limits `good`, `headsup` and `closing` to these: `coho`, `chum`, `steelhead`, `egg`, `spring` | blank = all |
+
+Examples:
+- `FRIEND_ALERTS=good,headsup,weekend` and `FRIEND_SPECIES=steelhead` sends steelhead GOOD alerts and steelhead heads-ups, plus the Thursday outlook.
+- Weir-release heads-ups count for every species.
+
+The `daily` type is the evening summary, and only exists while `ALWAYS_SEND=true`. The friend's notifications skip the Full report button, since it links to your private repo.
+
+## Testing locally
+```
+python cowichan_alert.py --dry-run            # live data, no push, no state saved
+python cowichan_alert.py --demo nov-drop      # synthetic: coho/chum GOOD on the drop
+python cowichan_alert.py --demo oct-pulse     # weir release raised in a drought year
+python cowichan_alert.py --demo drought       # drought hold, nothing pushed
+python cowichan_alert.py --demo feb-steel     # steelhead GOOD after a freshet
+python cowichan_alert.py --demo thursday      # Thursday run with the weekend outlook
+```
+Demos don't save state unless you set `STATE_FILE` yourself.
+
+## Tuning
+Everything you'd want to adjust is at the top of the script:
+- `SPECIES`: flow bands and seasonal weights.
+- `CARDS`: gear and play text.
+- `PROJ`: the weekend flow projection.
+- `DROUGHT_FLOW`.
+
+The weekend projection's drop rate is measured, but how much a given rainfall raises the river (`k_*` in `PROJ`) is still a guess, so treat its flow numbers as direction more than value.
+
+## Troubleshooting
+- **Testing after an edit:** use **Run workflow**, not **Re-run**. A re-run replays the original commit, so it runs the old code.
+- **A red X:** open the run, then the `check` job, then the step with the red mark. ntfy errors print the reason, for example a `NTFY_TOPIC` that isn't a plain topic name.
+- **"Could not save state.json" warning:** the run still worked; an alert may repeat once.
+
+## Limits
+- The regulation calendar expires with the synopsis on 2027-03-31. Alerts will warn you after that date.
+- Mile 66 to Sandy Pool from Sep 1 to Nov 15 is flagged as unclear: DFO lists it open for salmon catch and release, but the provincial table lists it closed. Confirm with DFO Duncan (250-746-6221).
+- This does not replace reading the current notices before you go.
