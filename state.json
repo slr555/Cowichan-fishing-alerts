@@ -53,10 +53,18 @@
       "priority": "3",
       "t": "2026-10-30T05:33:47.601169+00:00",
       "title": "Weekend: Sunday looks best (Trout egg bite 7.0)"
+    },
+    {
+      "kinds": [
+        "daily"
+      ],
+      "priority": "2",
+      "t": "2026-10-31T05:20:53.083212+00:00",
+      "title": "Cowichan daily: best is Trout egg bite 5.2"
     }
   ],
   "last_outlook": "2026-10-29",
-  "last_run": "2026-10-30T17:08:11.309573+00:00",
+  "last_run": "2026-10-31T05:20:53.083212+00:00",
   "regs": {
     "BC in-season changes": {
       "alerted": false,
@@ -73,7 +81,7 @@
       ]
     }
   },
-  "regs_checked_at": "2026-10-30T17:08:11.309573+00:00",
+  "regs_checked_at": "2026-10-31T05:20:53.083212+00:00",
   "season": {
     "fall_freshet": "2026-10-17T20:55:00+00:00",
     "key": 2026
@@ -81,7 +89,7 @@
   "tiers": {
     "chum": "POOR",
     "coho": "POOR",
-    "egg": "POOR",
+    "egg": "FAIR",
     "spring": "POOR",
     "steelhead": "POOR"
   }
