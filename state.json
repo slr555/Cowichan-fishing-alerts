@@ -1,7 +1,7 @@
 {
   "fail": {
-    "alerted_at": null,
-    "count": 0
+    "alerted_at": "2026-11-04T18:50:12.827073+00:00",
+    "count": 1
   },
   "good_alert_at": {
     "egg": "2026-11-01T17:13:55.971292+00:00"
@@ -111,20 +111,20 @@
   "regs": {
     "BC in-season changes": {
       "alerted": false,
-      "fails": 0,
+      "fails": 1,
       "rows": [
         "Cowichan River | No fishing | July 4, 2025 to August 31, 2025"
       ]
     },
     "DFO salmon table": {
       "alerted": false,
-      "fails": 0,
+      "fails": 1,
       "rows": [
         "66 Mile Trestle \u2192 Sandy Pool | All | Sep 1 to July 14 | Open for salmon catch and release"
       ]
     }
   },
-  "regs_checked_at": "2026-11-04T06:00:25.979604+00:00",
+  "regs_checked_at": "2026-11-04T18:50:12.827073+00:00",
   "season": {
     "fall_freshet": "2026-10-17T20:55:00+00:00",
     "key": 2026
