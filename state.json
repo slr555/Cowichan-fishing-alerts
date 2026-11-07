@@ -7,6 +7,7 @@
     "egg": "2026-11-05T06:27:43.538236+00:00"
   },
   "heads": [
+    "weir:pulse",
     "coho:freshen",
     "chum:freshen"
   ],
@@ -140,10 +141,18 @@
       "priority": "3",
       "t": "2026-11-06T06:22:32.704242+00:00",
       "title": "Weekend: Friday looks best (Coho 7.5)"
+    },
+    {
+      "kinds": [
+        "headsup"
+      ],
+      "priority": "3",
+      "t": "2026-11-07T05:46:00.251178+00:00",
+      "title": "Cowichan heads-up: Flow out of the lake up 7.1 \u2192 8.5 m\u00b3/s"
     }
   ],
   "last_outlook": "2026-11-05",
-  "last_run": "2026-11-06T18:21:29.356661+00:00",
+  "last_run": "2026-11-07T05:46:00.251178+00:00",
   "regs": {
     "BC in-season changes": {
       "alerted": false,
@@ -160,7 +169,7 @@
       ]
     }
   },
-  "regs_checked_at": "2026-11-06T18:21:29.356661+00:00",
+  "regs_checked_at": "2026-11-07T05:46:00.251178+00:00",
   "season": {
     "fall_freshet": "2026-10-17T20:55:00+00:00",
     "key": 2026
@@ -168,7 +177,7 @@
   "tiers": {
     "chum": "POOR",
     "coho": "POOR",
-    "egg": "FAIR",
+    "egg": "POOR",
     "spring": "POOR",
     "steelhead": "POOR"
   }
