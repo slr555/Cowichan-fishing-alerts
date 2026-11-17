@@ -273,11 +273,11 @@
     }
   ],
   "last_outlook": "2026-11-12",
-  "last_run": "2026-11-17T07:43:29.287352+00:00",
+  "last_run": "2026-11-17T19:59:41.034850+00:00",
   "regs": {
     "BC in-season changes": {
       "alerted": false,
-      "fails": 0,
+      "fails": 1,
       "rows": [
         "Cowichan River | No fishing | July 4, 2025 to August 31, 2025"
       ]
@@ -290,7 +290,7 @@
       ]
     }
   },
-  "regs_checked_at": "2026-11-17T07:43:29.287352+00:00",
+  "regs_checked_at": "2026-11-17T19:59:41.034850+00:00",
   "season": {
     "fall_freshet": "2026-10-17T20:55:00+00:00",
     "key": 2026
@@ -298,7 +298,7 @@
   "tiers": {
     "chum": "POOR",
     "coho": "POOR",
-    "egg": "POOR",
+    "egg": "FAIR",
     "spring": "POOR",
     "steelhead": "POOR"
   }
