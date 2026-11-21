@@ -1,16 +1,15 @@
 {
   "fail": {
-    "alerted_at": "2026-11-20T06:58:39.646465+00:00",
-    "count": 2
+    "alerted_at": null,
+    "count": 0
   },
   "good_alert_at": {
-    "chum": "2026-11-14T17:16:57.377977+00:00",
+    "chum": "2026-11-21T06:54:12.592955+00:00",
     "coho": "2026-11-09T06:00:08.052905+00:00",
     "egg": "2026-11-05T06:27:43.538236+00:00"
   },
   "heads": [
-    "coho:window",
-    "chum:window"
+    "coho:window"
   ],
   "history": [
     {
@@ -294,10 +293,26 @@
       "priority": "3",
       "t": "2026-11-19T07:10:18.482814+00:00",
       "title": "Weekend: nothing worth the drive"
+    },
+    {
+      "kinds": [
+        "system"
+      ],
+      "priority": "2",
+      "t": "2026-11-21T06:54:12.592955+00:00",
+      "title": "Cowichan alert: data is back"
+    },
+    {
+      "kinds": [
+        "good"
+      ],
+      "priority": "4",
+      "t": "2026-11-21T06:54:12.592955+00:00",
+      "title": "Chum GOOD on the Cowichan"
     }
   ],
   "last_outlook": "2026-11-19",
-  "last_run": "2026-11-19T19:36:21.737801+00:00",
+  "last_run": "2026-11-21T06:54:12.592955+00:00",
   "regs": {
     "BC in-season changes": {
       "alerted": false,
@@ -314,13 +329,13 @@
       ]
     }
   },
-  "regs_checked_at": "2026-11-20T19:14:25.119347+00:00",
+  "regs_checked_at": "2026-11-21T06:54:12.592955+00:00",
   "season": {
     "fall_freshet": "2026-10-17T20:55:00+00:00",
     "key": 2026
   },
   "tiers": {
-    "chum": "FAIR",
+    "chum": "GOOD",
     "coho": "FAIR",
     "egg": "FAIR",
     "spring": "POOR",
