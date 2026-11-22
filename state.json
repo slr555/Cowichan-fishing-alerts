@@ -6,7 +6,7 @@
   "good_alert_at": {
     "chum": "2026-11-21T06:54:12.592955+00:00",
     "coho": "2026-11-21T18:09:52.946672+00:00",
-    "egg": "2026-11-05T06:27:43.538236+00:00"
+    "egg": "2026-11-22T06:29:40.631891+00:00"
   },
   "heads": [],
   "history": [
@@ -315,14 +315,22 @@
       "priority": "4",
       "t": "2026-11-21T18:09:52.946672+00:00",
       "title": "Coho & Chum GOOD on the Cowichan"
+    },
+    {
+      "kinds": [
+        "good"
+      ],
+      "priority": "4",
+      "t": "2026-11-22T06:29:40.631891+00:00",
+      "title": "Coho, Chum & Trout egg bite GOOD on the Cowichan"
     }
   ],
   "last_outlook": "2026-11-19",
-  "last_run": "2026-11-21T18:09:52.946672+00:00",
+  "last_run": "2026-11-22T06:29:40.631891+00:00",
   "regs": {
     "BC in-season changes": {
       "alerted": false,
-      "fails": 1,
+      "fails": 2,
       "rows": [
         "Cowichan River | No fishing | July 4, 2025 to August 31, 2025"
       ]
@@ -335,7 +343,7 @@
       ]
     }
   },
-  "regs_checked_at": "2026-11-21T18:09:52.946672+00:00",
+  "regs_checked_at": "2026-11-22T06:29:40.631891+00:00",
   "season": {
     "fall_freshet": "2026-10-17T20:55:00+00:00",
     "key": 2026
@@ -343,7 +351,7 @@
   "tiers": {
     "chum": "GOOD",
     "coho": "GOOD",
-    "egg": "FAIR",
+    "egg": "GOOD",
     "spring": "POOR",
     "steelhead": "POOR"
   }
