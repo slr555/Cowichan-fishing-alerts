@@ -16,14 +16,6 @@
   "history": [
     {
       "kinds": [
-        "daily"
-      ],
-      "priority": "2",
-      "t": "2026-11-01T05:49:26.350354+00:00",
-      "title": "Cowichan daily: best is Trout egg bite 4.9"
-    },
-    {
-      "kinds": [
         "good"
       ],
       "priority": "4",
@@ -336,10 +328,18 @@
       "priority": "3",
       "t": "2026-11-27T20:14:58.195335+00:00",
       "title": "Cowichan heads-up: Coho"
+    },
+    {
+      "kinds": [
+        "daily"
+      ],
+      "priority": "2",
+      "t": "2026-11-28T07:32:14.067312+00:00",
+      "title": "Cowichan daily: best is Coho 2.0"
     }
   ],
   "last_outlook": "2026-11-26",
-  "last_run": "2026-11-27T20:14:58.195335+00:00",
+  "last_run": "2026-11-28T07:32:14.067312+00:00",
   "regs": {
     "BC in-season changes": {
       "alerted": false,
@@ -356,7 +356,7 @@
       ]
     }
   },
-  "regs_checked_at": "2026-11-27T20:14:58.195335+00:00",
+  "regs_checked_at": "2026-11-28T07:32:14.067312+00:00",
   "season": {
     "fall_freshet": "2026-10-17T20:55:00+00:00",
     "key": 2026
